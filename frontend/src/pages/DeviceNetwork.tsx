@@ -51,6 +51,7 @@ import {
 import { api, type DdnsConfig, type DdnsLogEntry, type DdnsStatusResponse, type NetworkInterfaceInfo, type WlanNetwork, type WlanSavedNetwork, type WlanStatusResponse } from '../api/current'
 import ErrorSnackbar from '../components/ErrorSnackbar'
 import { useRefreshInterval } from '../contexts/RefreshContext'
+import { publicIpv6AddressEntries } from '@/utils/ip'
 
 const CONFIRM_CLOSE_WLAN = '确认关闭 WLAN'
 const CARD_TITLE_TYPOGRAPHY = { variant: 'subtitle1', fontWeight: 700 } as const
@@ -199,9 +200,12 @@ function isDdnsConfigComplete(config: DdnsConfig, accessSecretConfigured: boolea
 }
 
 function interfaceAddressesForFamily(iface: NetworkInterfaceInfo, family: 'ipv4' | 'ipv6') {
+  if (family === 'ipv6') {
+    return publicIpv6AddressEntries(iface.ip_addresses)
+  }
+
   return iface.ip_addresses.filter((addr) => {
     if (addr.ip_type !== family) return false
-    if (family === 'ipv6' && addr.address.toLowerCase().startsWith('fe80:')) return false
     return !addr.address.startsWith('127.') && addr.address !== '::1'
   })
 }

@@ -10,8 +10,8 @@ import type {
   AirplaneModeResponse,
   RoamingResponse,
   NetworkInterfaceInfo,
-  IpAddress,
 } from '@/api/types'
+import { publicIpv6Addresses } from '@/utils/ip'
 
 export const SPEED_HISTORY_MAX_POINTS = 30
 
@@ -48,13 +48,6 @@ export interface ConnectivityResult {
 export interface ConnectionAddresses {
   ipv4: string[]
   ipv6: string[]
-}
-
-function publicIpv6Addresses(addresses: IpAddress[]): string[] {
-  return addresses
-    .filter((ip) => ip.ip_type === 'ipv6' && ip.scope === 'public')
-    .sort((a, b) => Number(b.prefix_len === 128) - Number(a.prefix_len === 128))
-    .map((ip) => ip.address)
 }
 
 function connectionAddressesFromInterfaces(interfaces: NetworkInterfaceInfo[]): ConnectionAddresses {

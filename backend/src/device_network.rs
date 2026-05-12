@@ -15,8 +15,8 @@ use tokio::sync::Mutex;
 use crate::config::{ConfigManager, DdnsConfig, DdnsIpConfig};
 use crate::models::{
     DdnsEvent, DdnsLogEntry, DdnsLogsResponse, DdnsRecordSyncResult, DdnsStatusResponse,
-    DdnsSyncResponse, WlanConnectRequest, WlanEnabledRequest, WlanForgetRequest, WlanNetwork,
-    WlanProfileRequest, WlanProfilesResponse, WlanSavedNetwork, WlanScanResponse,
+    DdnsSyncResponse, IpAddress, WlanConnectRequest, WlanEnabledRequest, WlanForgetRequest,
+    WlanNetwork, WlanProfileRequest, WlanProfilesResponse, WlanSavedNetwork, WlanScanResponse,
     WlanStatusResponse,
 };
 use crate::notification::NotificationSender;
@@ -406,29 +406,38 @@ fn get_ip_from_interface(ip_config: &DdnsIpConfig, record_type: &str) -> Result<
                 return false;
             }
 
-            iface.ip_addresses.iter().any(|addr| {
-                if record_type == "A" {
-                    return addr.ip_type.eq_ignore_ascii_case("ipv4");
-                }
-                record_type == "AAAA"
-                    && addr.ip_type.eq_ignore_ascii_case("ipv6")
-                    && !addr.address.to_ascii_lowercase().starts_with("fe80:")
-            })
+            !ddns_interface_addresses_for_record(&iface.ip_addresses, record_type).is_empty()
         })
         .ok_or_else(|| "no matching network interface found".to_string())?;
 
-    for addr in &iface.ip_addresses {
-        if record_type == "A" && addr.ip_type.eq_ignore_ascii_case("ipv4") {
-            return Ok(addr.address.clone());
-        }
-        if record_type == "AAAA"
-            && addr.ip_type.eq_ignore_ascii_case("ipv6")
-            && !addr.address.to_ascii_lowercase().starts_with("fe80:")
-        {
-            return Ok(addr.address.clone());
-        }
+    ddns_interface_addresses_for_record(&iface.ip_addresses, record_type)
+        .first()
+        .map(|addr| addr.address.clone())
+        .ok_or_else(|| format!("no {record_type} address found on {}", iface.name))
+}
+
+fn ddns_interface_addresses_for_record<'a>(
+    addresses: &'a [IpAddress],
+    record_type: &str,
+) -> Vec<&'a IpAddress> {
+    let mut candidates: Vec<&IpAddress> = addresses
+        .iter()
+        .filter(|addr| {
+            if record_type == "A" {
+                return addr.ip_type.eq_ignore_ascii_case("ipv4");
+            }
+
+            record_type == "AAAA"
+                && addr.ip_type.eq_ignore_ascii_case("ipv6")
+                && addr.scope.eq_ignore_ascii_case("public")
+        })
+        .collect();
+
+    if record_type == "AAAA" {
+        candidates.sort_by_key(|addr| if addr.prefix_len == 128 { 0 } else { 1 });
     }
-    Err(format!("no {record_type} address found on {}", iface.name))
+
+    candidates
 }
 
 async fn update_cloudflare(
@@ -1405,6 +1414,44 @@ mod tests {
             extract_ip_from_text("2001:db8::1\n", "AAAA").as_deref(),
             Some("2001:db8::1")
         );
+    }
+
+    #[test]
+    fn ddns_ipv6_interface_addresses_match_dashboard_public_scope() {
+        let addresses = vec![
+            IpAddress {
+                address: "fe80::1".to_string(),
+                prefix_len: 64,
+                ip_type: "ipv6".to_string(),
+                scope: "link-local".to_string(),
+            },
+            IpAddress {
+                address: "fd00::1".to_string(),
+                prefix_len: 64,
+                ip_type: "ipv6".to_string(),
+                scope: "private".to_string(),
+            },
+            IpAddress {
+                address: "2408::64".to_string(),
+                prefix_len: 64,
+                ip_type: "ipv6".to_string(),
+                scope: "public".to_string(),
+            },
+            IpAddress {
+                address: "2408::128".to_string(),
+                prefix_len: 128,
+                ip_type: "ipv6".to_string(),
+                scope: "public".to_string(),
+            },
+        ];
+
+        let candidates = ddns_interface_addresses_for_record(&addresses, "AAAA");
+        let candidate_addresses: Vec<&str> = candidates
+            .iter()
+            .map(|addr| addr.address.as_str())
+            .collect();
+
+        assert_eq!(candidate_addresses, vec!["2408::128", "2408::64"]);
     }
 
     #[test]
