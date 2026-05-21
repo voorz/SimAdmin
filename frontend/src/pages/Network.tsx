@@ -347,7 +347,10 @@ export default function NetworkPage() {
         if (apnRes.data?.contexts) {
           setApnContexts(apnRes.data.contexts)
           if (!apnInitialized) {
-            const activeContext = apnRes.data.contexts.find(c => c.apn) || apnRes.data.contexts[0]
+            const activeContext =
+              apnRes.data.contexts.find((c) => c.active) ||
+              apnRes.data.contexts.find((c) => c.apn) ||
+              apnRes.data.contexts[0]
             if (activeContext) {
               setSelectedContext(activeContext.path)
               setApnForm({

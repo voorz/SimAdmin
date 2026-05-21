@@ -278,7 +278,7 @@ impl DdnsManager {
 
     async fn get_ip(&self, ip_config: &DdnsIpConfig, record_type: &str) -> Result<String, String> {
         match ip_config.get_type.as_str() {
-            "interface" => get_ip_from_interface(ip_config, record_type),
+            "interface" => get_ip_from_interface(ip_config, record_type).await,
             "api" | "" => self.get_ip_from_api(ip_config, record_type).await,
             other => Err(format!("unsupported IP source: {other}")),
         }
@@ -390,8 +390,8 @@ fn extract_ip_from_text(text: &str, record_type: &str) -> Option<String> {
     None
 }
 
-fn get_ip_from_interface(ip_config: &DdnsIpConfig, record_type: &str) -> Result<String, String> {
-    let interfaces = read_network_interfaces()?;
+async fn get_ip_from_interface(ip_config: &DdnsIpConfig, record_type: &str) -> Result<String, String> {
+    let interfaces = read_network_interfaces(None).await?;
     let iface = interfaces
         .iter()
         .find(|iface| {

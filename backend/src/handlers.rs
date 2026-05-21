@@ -31,6 +31,7 @@ use crate::{
         send_sms, set_airplane_mode, set_apn_on_bearer, set_band_lock, set_call_waiting,
         set_data_connection_with_apn, set_radio_mode, start_cell_monitoring,
         stop_cell_monitoring, background_fetch_smsc,
+        find_nm_modem_connection_pub, nm_set_autoconnect_pub,
     },
     state::AppState,
     utils::{
@@ -990,8 +991,8 @@ pub async fn unlock_all_cells_handler(State(app): State<AppState>) -> impl IntoR
 }
 
 /// GET /api/network/interfaces
-pub async fn get_network_interfaces_info() -> impl IntoResponse {
-    match read_network_interfaces() {
+pub async fn get_network_interfaces_info(State(dbus_conn): State<Arc<Connection>>) -> impl IntoResponse {
+    match read_network_interfaces(Some(&dbus_conn)).await {
         Ok(interfaces) => {
             let total_count = interfaces.len();
             (
@@ -1380,6 +1381,12 @@ pub async fn set_data_status(
             }
             app.data_user_disabled
                 .store(!payload.active, Ordering::SeqCst);
+            // 同步 NM autoconnect 状态，防止用户关闭数据后 NM 自动重连
+            tokio::spawn(async move {
+                if let Ok(profile) = find_nm_modem_connection_pub().await {
+                    let _ = nm_set_autoconnect_pub(&profile, payload.active).await;
+                }
+            });
             (
                 StatusCode::OK,
                 Json(ApiResponse::success_with_message(
@@ -2230,14 +2237,14 @@ fn read_temperature_sensors() -> Vec<ThermalZone> {
 }
 
 /// GET /api/stats
-pub async fn get_system_stats() -> impl IntoResponse {
+pub async fn get_system_stats(State(dbus_conn): State<Arc<Connection>>) -> impl IntoResponse {
     let result: Result<SystemStatsResponse, String> = async {
         let interfaces =
             get_active_interfaces().map_err(|e| format!("Failed to get interfaces: {}", e))?;
 
         let mut initial: Vec<(String, u64, u64)> = Vec::new();
         for iface in &interfaces {
-            if let Ok((rx, tx)) = read_interface_stats(iface) {
+            if let Ok((rx, tx)) = read_interface_stats(iface, Some(&dbus_conn)).await {
                 initial.push((iface.clone(), rx, tx));
             }
         }
@@ -2251,7 +2258,7 @@ pub async fn get_system_stats() -> impl IntoResponse {
         let mut speed_data = Vec::new();
         let elapsed = 1.0_f64;
         for (interface, rx1, tx1) in &initial {
-            if let Ok((rx2, tx2)) = read_interface_stats(interface) {
+            if let Ok((rx2, tx2)) = read_interface_stats(interface, Some(&dbus_conn)).await {
                 let rx_speed = rx2.saturating_sub(*rx1);
                 let tx_speed = tx2.saturating_sub(*tx1);
                 speed_data.push(NetworkSpeed {

@@ -44,7 +44,7 @@ use db::Database;
 use device_network::DdnsManager;
 use esim::EsimSupervisor;
 use handlers::*;
-use modem_manager::{ensure_networkmanager_wwan_unmanaged, init_data_connection};
+use modem_manager::{ensure_nm_modem_profile, init_data_connection};
 use notification::NotificationSender;
 use state::AppState;
 
@@ -290,8 +290,8 @@ async fn main() -> Result<()> {
     let cell_monitoring_active = Arc::new(AtomicBool::new(false));
     let esim_supervisor = Arc::new(EsimSupervisor::new(Arc::clone(&config_manager)));
 
-    let nm_result = ensure_networkmanager_wwan_unmanaged().await;
-    tracing::info!(result = %nm_result, "NetworkManager modem ownership check completed");
+    let nm_result = ensure_nm_modem_profile().await;
+    tracing::info!(result = %nm_result, "NetworkManager modem profile setup completed");
 
     // 初始化通知发送器
     let notification_sender = Arc::new(NotificationSender::new(

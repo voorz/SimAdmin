@@ -36,6 +36,8 @@
 	<br/><br/>
 	<img src="./static/Device_Information.png" width="100%" alt="Device_Information" />
 	<br/><br/>
+	<img src="./static/eSIM.png" width="100%" alt="eSIM" />
+	<br/><br/>
 	<img src="./static/Cellular_Network.png" width="100%" alt="Cellular_Network" />
 	<br/><br/>
 	<img src="./static/WLAN.png" width="100%" alt="WLAN" />
@@ -392,6 +394,31 @@ journalctl -u simadmin -f
 - OTA 上传、在线下载、校验、替换二进制和前端资源。
 
 ## 🚀 版本更新记录
+
+### 📌 v1.0.6
+
+#### ✨ 新增功能
+
+- 数据连接管控从 ModemManager D-Bus 迁移至 NetworkManager，通过nmcli实现联网启停。
+- 交由 NetworkManager 自动完成接口启用、IP、DNS、IPv6 及路由全流程配置。
+- 新增双轨流量统计机制，精准获取蜂窝网口真实上下行流量。
+
+#### 💫 体验优化
+
+- 职责拆分，ModemManager 仅负责信号、注册状态等只读查询。
+- 程序启动自动清理旧 `unmanaged` 配置，自动生成蜂窝网络配置。
+- 移除 `wwan0` 等网口名称硬编码，由 `NetworkManager` 自动适配识别。
+- APN 配置界面默认选中并展示当前已连接的 APN 槽位。
+- 优化 DDNS 公网 IP 获取逻辑，非蜂窝网卡跳过冗余 D-Bus 请求，减少资源开销。
+- 优化蜂窝流量统计逻辑，自动识别实际数据网口，摆脱固定网口名称依赖。
+- 完善蜂窝接口流量展示，支持展示真实上下行流量字节与数据包数量。
+
+#### 🐞 bug 修复
+
+- 彻底修复数据连接假开关问题，解决前台显示已联网、实际接口未启用无 IP 无法上网的故障。
+- 修复正常网口因内核限制被误判为 `UNKNOWN` 的问题，优化状态自动纠正逻辑。
+- 彻底解决高通平台蜂窝网口流量统计恒为 0 问题，同时兼容联发科、展锐等多类模组设备。
+- 解决内核网口统计数据不准，造成前端无法展示真实蜂窝流量的问题。
 
 ### 📌 v1.0.5
 

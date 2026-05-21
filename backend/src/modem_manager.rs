@@ -60,6 +60,7 @@ const NETWORK_REGISTER_TIMEOUT_SECS: u64 = 45;
 const SEARCHING_REGISTER_THRESHOLD: u32 = 4;
 const SEARCHING_RADIO_RESET_THRESHOLD: u32 = 8;
 const DATA_CONNECT_RETRY_COOLDOWN_SECS: u64 = 120;
+const NM_CREATED_PROFILE_NAME: &str = "simadmin-modem";
 const MM_MODEM_STATE_REGISTERED: i32 = 8;
 const MM_MODEM_STATE_DISCONNECTING: i32 = 9;
 const MM_MODEM_STATE_CONNECTING: i32 = 10;
@@ -1989,6 +1990,7 @@ fn is_get_cellinfo_unsupported(err: &zbus::Error) -> bool {
         || (msg.contains("Cannot get cell info") && msg.contains("operation not supported"))
 }
 
+#[allow(dead_code)]
 fn is_disconnect_invalid_handle(err: &zbus::Error) -> bool {
     let msg = format!("{err}");
     msg.contains("org.freedesktop.libqmi.Error.Protocol.InvalidHandle")
@@ -2445,6 +2447,25 @@ LTE Timing Advance: 'unavailable'"#;
         assert_eq!(parsed.cells[2].band, "B1");
         assert_eq!(parsed.cells[2].earfcn, "100");
         assert_eq!(parsed.cells[2].pci, "76");
+    }
+
+    #[test]
+    fn parses_qmicli_packet_statistics_bytes() {
+        let output = "[/dev/wwan0qmi0] Connection statistics:
+\tTX packets OK: 10
+\tRX packets OK: 13
+\tTX bytes OK: 840
+\tRX bytes OK: 1092";
+
+        assert_eq!(
+            parse_qmicli_packet_statistics(output),
+            Some(BearerTrafficStats {
+                rx_bytes: 1092,
+                tx_bytes: 840,
+                rx_packets: 13,
+                tx_packets: 10,
+            })
+        );
     }
 
     #[test]
@@ -3349,6 +3370,7 @@ async fn resolve_simple_connect_settings(
     settings
 }
 
+#[allow(dead_code)]
 fn insert_simple_connect_settings<'a>(
     props: &mut HashMap<String, Value<'a>>,
     settings: &'a SimpleConnectSettings,
@@ -3395,55 +3417,72 @@ async fn set_data_connection_inner(
     configured_apn: Option<&ApnConfig>,
 ) -> zbus::Result<()> {
     with_serial(async {
-        let modem_path = find_modem_path(conn).await?;
-        let proxy = Proxy::new(conn, MM_SERVICE, modem_path.as_str(), MM_MODEM_SIMPLE).await?;
+        let profile = find_nm_modem_connection()
+            .await
+            .map_err(|err| zbus::fdo::Error::Failed(format!(
+                "找不到 NM modem 连接 profile: {err}"
+            )))?;
 
         if active {
-            let state = modem_state(conn, &modem_path).await?;
-            if state >= MM_MODEM_STATE_CONNECTED {
-                info!(
-                    state = mm_state_to_string(state),
-                    "Data connection already active, skipping duplicate connect"
-                );
-                return Ok(());
-            }
-            if data_connection_transition_in_progress(state) {
-                info!(
-                    state = mm_state_to_string(state),
-                    "Data connection transition in progress, skipping duplicate connect"
-                );
-                return Ok(());
-            }
-
-            // 连接前清理残余 Bearer，防止历史 BUG 残留的 PDP Context 占用资源
-            let connect_settings =
-                resolve_simple_connect_settings(conn, &modem_path, configured_apn).await;
-            disconnect_known_bearers(conn, &modem_path).await;
-
-            let mut props: HashMap<String, Value<'_>> = HashMap::new();
-            props.insert("allow-roaming".to_string(), Value::new(allow_roaming));
-            insert_simple_connect_settings(&mut props, &connect_settings);
-            let bearer: OwnedObjectPath = proxy.call("Connect", &(props,)).await?;
-            info!(
-                allow_roaming,
-                apn = connect_settings.apn.as_deref().unwrap_or(""),
-                apn_source = connect_settings.source.unwrap_or("none"),
-                bearer = %bearer,
-                "Data connection activation requested"
-            );
-        } else {
-            let root_path = zbus::zvariant::ObjectPath::try_from("/").unwrap();
-            if let Err(err) = proxy.call::<_, _, ()>("Disconnect", &(root_path,)).await {
-                if is_disconnect_invalid_handle(&err)
-                    && !get_data_connection_status(conn).await.unwrap_or(false)
-                {
-                    warn!(error = %err, "Disconnect returned InvalidHandle after data session was already torn down");
-                } else {
-                    return Err(err);
+            // 检查 modem 状态，避免重复连接
+            if let Ok(modem_path) = find_modem_path(conn).await {
+                let state = modem_state(conn, &modem_path).await.unwrap_or(0);
+                if state >= MM_MODEM_STATE_CONNECTED {
+                    info!(
+                        state = mm_state_to_string(state),
+                        "Data connection already active, skipping duplicate connect"
+                    );
+                    return Ok(());
+                }
+                if data_connection_transition_in_progress(state) {
+                    info!(
+                        state = mm_state_to_string(state),
+                        "Data connection transition in progress, skipping duplicate connect"
+                    );
+                    return Ok(());
                 }
             }
-            disconnect_known_bearers(conn, &modem_path).await;
-            info!("Data connection disconnected");
+
+            // 解析 APN 设置
+            let connect_settings = if let Ok(modem_path) = find_modem_path(conn).await {
+                resolve_simple_connect_settings(conn, &modem_path, configured_apn).await
+            } else {
+                configured_apn
+                    .map(apn_config_to_simple_connect_settings)
+                    .unwrap_or_default()
+            };
+
+            // 更新 NM profile 的 APN/漫游设置
+            if let Err(err) = nm_update_connection(&profile, &connect_settings, allow_roaming).await {
+                warn!(error = %err, "Failed to update NM connection settings, proceeding with existing");
+            }
+
+            // 通过 NM 激活连接（NM 自动处理接口 UP、IP 配置、DNS、路由）
+            nm_activate_connection(&profile).await.map_err(|err| {
+                zbus::fdo::Error::Failed(format!("NM 连接激活失败: {err}"))
+            })?;
+
+            info!(
+                allow_roaming,
+                profile = %profile,
+                apn = connect_settings.apn.as_deref().unwrap_or(""),
+                apn_source = connect_settings.source.unwrap_or("none"),
+                "Data connection activated via NetworkManager"
+            );
+        } else {
+            // 通过 NM 停用连接
+            if let Err(err) = nm_deactivate_connection(&profile).await {
+                // 如果已经断开，忽略错误
+                if !get_data_connection_status(conn).await.unwrap_or(false) {
+                    warn!(error = %err, "NM deactivation returned error but data is already disconnected");
+                } else {
+                    return Err(zbus::fdo::Error::Failed(format!(
+                        "NM 连接停用失败: {err}"
+                    ))
+                    .into());
+                }
+            }
+            info!("Data connection disconnected via NetworkManager");
         }
 
         Ok(())
@@ -3457,6 +3496,7 @@ pub async fn get_data_connection_status(conn: &Connection) -> zbus::Result<bool>
     Ok(modem_props.get("State").map(extract_i32).unwrap_or(0) >= MM_MODEM_STATE_CONNECTED)
 }
 
+#[allow(dead_code)]
 async fn disconnect_known_bearers(conn: &Connection, modem_path: &str) {
     let mut paths = match get_property(conn, modem_path, MM_MODEM, "Bearers").await {
         Ok(value) => extract_object_path_array(&value),
@@ -3685,18 +3725,13 @@ async fn simple_connect_for_baseband_restart(
     allow_roaming: bool,
     configured_apn: Option<&ApnConfig>,
 ) -> Result<String, String> {
-    let proxy = Proxy::new(conn, MM_SERVICE, modem_path, MM_MODEM_SIMPLE)
-        .await
-        .map_err(|err| err.to_string())?;
+    let profile = find_nm_modem_connection().await?;
     let connect_settings = resolve_simple_connect_settings(conn, modem_path, configured_apn).await;
-    let mut props: HashMap<String, Value<'_>> = HashMap::new();
-    props.insert("allow-roaming".to_string(), Value::new(allow_roaming));
-    insert_simple_connect_settings(&mut props, &connect_settings);
-    let bearer_path: OwnedObjectPath = proxy
-        .call("Connect", &(props,))
-        .await
-        .map_err(|err| err.to_string())?;
-    Ok(bearer_path.to_string())
+    if let Err(err) = nm_update_connection(&profile, &connect_settings, allow_roaming).await {
+        warn!(error = %err, "Failed to update NM connection for baseband restart");
+    }
+    nm_activate_connection(&profile).await?;
+    Ok(format!("NM connection {profile} activated"))
 }
 
 async fn run_baseband_simple_connect_step(
@@ -4272,6 +4307,233 @@ fn extract_object_path_array(value: &OwnedValue) -> Vec<String> {
         return paths.into_iter().map(|p| p.to_string()).collect();
     }
     Vec::new()
+}
+
+fn extract_u64(value: &OwnedValue) -> u64 {
+    if let Ok(number) = u64::try_from(value.clone()) {
+        return number;
+    }
+    if let Ok(number) = u32::try_from(value.clone()) {
+        return number.into();
+    }
+    if let Ok(number) = i64::try_from(value.clone()) {
+        return number.max(0) as u64;
+    }
+    0
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct BearerTrafficStats {
+    pub rx_bytes: u64,
+    pub tx_bytes: u64,
+    pub rx_packets: u64,
+    pub tx_packets: u64,
+}
+
+fn bearer_paths_from_props(conn_value: Option<OwnedValue>) -> Vec<String> {
+    conn_value
+        .as_ref()
+        .map(extract_object_path_array)
+        .unwrap_or_default()
+}
+
+async fn bearer_paths_for_modem(conn: &Connection, modem_path: &str) -> Vec<String> {
+    let mut bearers = bearer_paths_from_props(
+        get_property(conn, modem_path, MM_MODEM, "Bearers")
+            .await
+            .ok(),
+    );
+
+    if let Ok(val) = get_property(conn, modem_path, MM_MODEM, "InitialBearer").await {
+        let initial = extract_string(&val);
+        if !initial.is_empty() && initial != "/" {
+            bearers.push(initial);
+        }
+    }
+
+    bearers.sort();
+    bearers.dedup();
+    bearers
+}
+
+fn bearer_interface_names(props: &InterfaceProperties) -> Vec<String> {
+    let mut names = Vec::new();
+    for key in ["Interface", "IpInterface"] {
+        if let Some(name) = props
+            .get(key)
+            .map(extract_string)
+            .and_then(non_empty_string)
+        {
+            if !names.contains(&name) {
+                names.push(name);
+            }
+        }
+    }
+    names
+}
+
+fn extract_bearer_stats(props: &InterfaceProperties) -> Option<BearerTrafficStats> {
+    let stats_val = props.get("Stats")?;
+    let stats_map = InterfaceProperties::try_from(stats_val.clone()).ok()?;
+    let rx_bytes = stats_map.get("rx-bytes").map(extract_u64).unwrap_or(0).max(
+        stats_map
+            .get("total-rx-bytes")
+            .map(extract_u64)
+            .unwrap_or(0),
+    );
+    let tx_bytes = stats_map.get("tx-bytes").map(extract_u64).unwrap_or(0).max(
+        stats_map
+            .get("total-tx-bytes")
+            .map(extract_u64)
+            .unwrap_or(0),
+    );
+    Some(BearerTrafficStats {
+        rx_bytes,
+        tx_bytes,
+        ..Default::default()
+    })
+}
+
+fn merge_stats(
+    primary: Option<BearerTrafficStats>,
+    fallback: Option<BearerTrafficStats>,
+) -> Option<BearerTrafficStats> {
+    match (primary, fallback) {
+        (Some(a), Some(b)) => Some(BearerTrafficStats {
+            rx_bytes: a.rx_bytes.max(b.rx_bytes),
+            tx_bytes: a.tx_bytes.max(b.tx_bytes),
+            rx_packets: a.rx_packets.max(b.rx_packets),
+            tx_packets: a.tx_packets.max(b.tx_packets),
+        }),
+        (Some(stats), None) | (None, Some(stats)) => Some(stats),
+        (None, None) => None,
+    }
+}
+
+fn merge_interface_stats(
+    stats_by_interface: &mut HashMap<String, BearerTrafficStats>,
+    interface_name: &str,
+    stats: BearerTrafficStats,
+) {
+    stats_by_interface
+        .entry(interface_name.to_string())
+        .and_modify(|current| {
+            current.rx_bytes = current.rx_bytes.max(stats.rx_bytes);
+            current.tx_bytes = current.tx_bytes.max(stats.tx_bytes);
+            current.rx_packets = current.rx_packets.max(stats.rx_packets);
+            current.tx_packets = current.tx_packets.max(stats.tx_packets);
+        })
+        .or_insert(stats);
+}
+
+fn parse_qmicli_packet_statistics(output: &str) -> Option<BearerTrafficStats> {
+    fn parse_line(output: &str, label: &str) -> Option<u64> {
+        output.lines().find_map(|line| {
+            let line = line.trim();
+            let value = line.strip_prefix(label)?.split(':').nth(1)?.trim();
+            value.parse::<u64>().ok()
+        })
+    }
+
+    let stats = BearerTrafficStats {
+        rx_bytes: parse_line(output, "RX bytes OK").unwrap_or(0),
+        tx_bytes: parse_line(output, "TX bytes OK").unwrap_or(0),
+        rx_packets: parse_line(output, "RX packets OK").unwrap_or(0),
+        tx_packets: parse_line(output, "TX packets OK").unwrap_or(0),
+    };
+
+    (stats != BearerTrafficStats::default()).then_some(stats)
+}
+
+async fn qmi_packet_stats_for_modem(
+    conn: &Connection,
+    modem_path: &str,
+) -> Option<BearerTrafficStats> {
+    let device = qmi_control_device(conn, modem_path).await?;
+    let args = vec![
+        "-p".to_string(),
+        "-d".to_string(),
+        device,
+        "--wds-get-packet-statistics".to_string(),
+    ];
+    let output = with_serial(async { run_modem_helper_command("qmicli", args).await })
+        .await
+        .ok()?;
+    parse_qmicli_packet_statistics(&output)
+}
+
+/// 遍历所有 modem 及其 bearers，按 ModemManager 声明的实际数据网口汇总流量 Stats。
+pub async fn get_bearer_stats_by_interface(
+    conn: &Connection,
+) -> zbus::Result<HashMap<String, BearerTrafficStats>> {
+    let mut stats_by_interface = HashMap::new();
+    let modem_paths = match list_modem_paths(conn).await {
+        Ok(paths) => paths,
+        Err(_) => return Ok(stats_by_interface),
+    };
+
+    for modem_path in modem_paths {
+        let bearers = bearer_paths_for_modem(conn, &modem_path).await;
+        let mut qmi_stats: Option<Option<BearerTrafficStats>> = None;
+
+        for bearer_path in bearers {
+            let bearer_props = match get_all_properties(conn, &bearer_path, MM_BEARER).await {
+                Ok(props) => props,
+                Err(_) => continue,
+            };
+
+            let interface_names = bearer_interface_names(&bearer_props);
+            if interface_names.is_empty() {
+                continue;
+            }
+
+            if qmi_stats.is_none() {
+                qmi_stats = Some(qmi_packet_stats_for_modem(conn, &modem_path).await);
+            }
+
+            if let Some(stats) =
+                merge_stats(extract_bearer_stats(&bearer_props), qmi_stats.flatten())
+            {
+                for interface_name in interface_names {
+                    merge_interface_stats(&mut stats_by_interface, &interface_name, stats);
+                }
+            }
+        }
+    }
+
+    Ok(stats_by_interface)
+}
+
+/// 遍历所有 modem 及其 bearers，查找与指定 interface 匹配的 bearer 并获取其流量 Stats
+pub async fn get_bearer_stats_for_interface(
+    conn: &Connection,
+    interface_name: &str,
+) -> zbus::Result<Option<BearerTrafficStats>> {
+    let modem_paths = match list_modem_paths(conn).await {
+        Ok(paths) => paths,
+        Err(_) => return Ok(None),
+    };
+
+    for modem_path in modem_paths {
+        for bearer_path in bearer_paths_for_modem(conn, &modem_path).await {
+            let bearer_props = match get_all_properties(conn, &bearer_path, MM_BEARER).await {
+                Ok(props) => props,
+                Err(_) => continue,
+            };
+
+            if bearer_interface_names(&bearer_props)
+                .iter()
+                .any(|name| name == interface_name)
+            {
+                return Ok(merge_stats(
+                    extract_bearer_stats(&bearer_props),
+                    qmi_packet_stats_for_modem(conn, &modem_path).await,
+                ));
+            }
+        }
+    }
+
+    Ok(None)
 }
 
 pub async fn set_apn_on_bearer(conn: &Connection, req: &SetApnRequest) -> zbus::Result<()> {
@@ -4948,6 +5210,14 @@ pub async fn init_data_connection(
     allow_roaming: bool,
     configured_apn: Option<ApnConfig>,
 ) -> String {
+    // 设置 NM autoconnect 状态
+    if let Ok(profile) = find_nm_modem_connection().await {
+        let auto = !user_disabled.load(Ordering::SeqCst);
+        if let Err(err) = nm_set_autoconnect(&profile, auto).await {
+            warn!(error = %err, auto, "Failed to set NM autoconnect during init");
+        }
+    }
+
     if user_disabled.load(Ordering::SeqCst) {
         return match set_data_connection_with_apn(
             conn,
@@ -4989,41 +5259,195 @@ pub async fn init_data_connection(
     }
 }
 
-pub async fn ensure_networkmanager_wwan_unmanaged() -> String {
-    let config_path = "/etc/NetworkManager/conf.d/99-simadmin-unmanaged-modem.conf";
-    let desired = "[keyfile]\nunmanaged-devices=interface-name:wwan*\n";
-
-    if tokio::fs::metadata("/etc/NetworkManager").await.is_err() {
-        return "NetworkManager not installed, unmanaged modem config skipped".to_string();
-    }
-
-    match tokio::fs::read_to_string(config_path).await {
-        Ok(content) if content == desired => {
-            return "NetworkManager already ignores wwan*".to_string();
+/// 启动时确保 NM 有可用的 modem 连接 profile；同时清理旧版本遗留的 unmanaged 配置
+pub async fn ensure_nm_modem_profile() -> String {
+    // 1. Remove old unmanaged config if it exists
+    let legacy_config = "/etc/NetworkManager/conf.d/99-simadmin-unmanaged-modem.conf";
+    if tokio::fs::metadata(legacy_config).await.is_ok() {
+        if let Err(err) = tokio::fs::remove_file(legacy_config).await {
+            warn!(path = legacy_config, error = %err, "Failed to remove legacy NM unmanaged config");
+        } else {
+            info!("Removed legacy NM unmanaged-modem config");
+            // Restart NM to pick up the change
+            if let Ok(status) = Command::new("systemctl")
+                .args(["is-active", "--quiet", "NetworkManager.service"])
+                .status()
+                .await
+            {
+                if status.success() {
+                    let _ = run_recovery_command("systemctl", &["restart", "NetworkManager.service"]).await;
+                    // Give NM a moment to come back and discover the modem
+                    tokio::time::sleep(Duration::from_secs(3)).await;
+                }
+            }
         }
-        _ => {}
     }
 
-    if let Err(err) = tokio::fs::create_dir_all("/etc/NetworkManager/conf.d").await {
-        return format!("Failed to create NetworkManager conf.d: {err}");
-    }
-    if let Err(err) = tokio::fs::write(config_path, desired).await {
-        return format!("Failed to write NetworkManager unmanaged modem config: {err}");
-    }
-
+    // 2. Check if NM is running
     match Command::new("systemctl")
         .args(["is-active", "--quiet", "NetworkManager.service"])
         .status()
         .await
     {
-        Ok(status) if status.success() => {
-            match run_recovery_command("systemctl", &["restart", "NetworkManager.service"]).await {
-                Ok(_) => "NetworkManager configured to ignore wwan*, service restarted".to_string(),
-                Err(err) => format!("NetworkManager config written, restart failed: {err}"),
+        Ok(status) if status.success() => {}
+        _ => return "NetworkManager is not active, NM modem profile setup skipped".to_string(),
+    }
+
+    // 3. Find or create modem profile
+    match find_nm_modem_connection().await {
+        Ok(name) => {
+            info!(profile = %name, "Found existing NM modem connection profile");
+            format!("NM modem profile ready: {name}")
+        }
+        Err(_) => match create_nm_modem_connection().await {
+            Ok(name) => {
+                info!(profile = %name, "Created NM modem connection profile");
+                format!("NM modem profile created: {name}")
+            }
+            Err(err) => {
+                warn!(error = %err, "Failed to create NM modem connection profile");
+                format!("NM modem profile setup failed: {err}")
+            }
+        },
+    }
+}
+
+/// Public wrapper for handlers to query the NM modem connection profile name
+pub async fn find_nm_modem_connection_pub() -> Result<String, String> {
+    find_nm_modem_connection().await
+}
+
+/// Public wrapper for handlers to set NM autoconnect
+pub async fn nm_set_autoconnect_pub(profile: &str, enabled: bool) -> Result<(), String> {
+    nm_set_autoconnect(profile, enabled).await
+}
+
+async fn find_nm_modem_connection() -> Result<String, String> {
+    let output = Command::new("nmcli")
+        .args(["-t", "-f", "NAME,TYPE", "connection", "show"])
+        .output()
+        .await
+        .map_err(|err| format!("failed to run nmcli: {err}"))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "nmcli failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for line in stdout.lines() {
+        // nmcli -t output uses ':' as separator
+        if let Some((name, type_field)) = line.rsplit_once(':') {
+            if type_field.trim() == "gsm" {
+                let name = name.trim();
+                if !name.is_empty() {
+                    return Ok(name.to_string());
+                }
             }
         }
-        _ => "NetworkManager configured to ignore wwan*, service not active".to_string(),
     }
+
+    Err("no gsm connection profile found in NetworkManager".to_string())
+}
+
+async fn create_nm_modem_connection() -> Result<String, String> {
+    run_recovery_command(
+        "nmcli",
+        &[
+            "connection",
+            "add",
+            "type",
+            "gsm",
+            "con-name",
+            NM_CREATED_PROFILE_NAME,
+            "ifname",
+            "*",
+            "gsm.auto-config",
+            "yes",
+            "connection.autoconnect",
+            "no",
+        ],
+    )
+    .await?;
+    Ok(NM_CREATED_PROFILE_NAME.to_string())
+}
+
+async fn nm_update_connection(
+    profile: &str,
+    settings: &SimpleConnectSettings,
+    allow_roaming: bool,
+) -> Result<(), String> {
+    let mut args: Vec<String> = vec![
+        "connection".into(),
+        "modify".into(),
+        profile.into(),
+    ];
+
+    if let Some(apn) = settings.apn.as_deref().filter(|a| !a.trim().is_empty()) {
+        args.push("gsm.apn".into());
+        args.push(apn.trim().into());
+    }
+    if let Some(user) = settings.user.as_deref().filter(|u| !u.trim().is_empty()) {
+        args.push("gsm.username".into());
+        args.push(user.trim().into());
+    }
+    if let Some(password) = settings.password.as_deref().filter(|p| !p.trim().is_empty()) {
+        args.push("gsm.password".into());
+        args.push(password.into());
+    }
+    args.push("gsm.home-only".into());
+    args.push(if allow_roaming { "no" } else { "yes" }.into());
+
+    run_recovery_command_owned("nmcli", &args, Duration::from_secs(10)).await?;
+    Ok(())
+}
+
+async fn nm_activate_connection(profile: &str) -> Result<(), String> {
+    run_recovery_command_owned(
+        "nmcli",
+        &[
+            "--wait".into(),
+            "45".into(),
+            "connection".into(),
+            "up".into(),
+            profile.into(),
+        ],
+        Duration::from_secs(60),
+    )
+    .await?;
+    Ok(())
+}
+
+async fn nm_deactivate_connection(profile: &str) -> Result<(), String> {
+    run_recovery_command_owned(
+        "nmcli",
+        &[
+            "connection".into(),
+            "down".into(),
+            profile.into(),
+        ],
+        Duration::from_secs(15),
+    )
+    .await?;
+    Ok(())
+}
+
+async fn nm_set_autoconnect(profile: &str, enabled: bool) -> Result<(), String> {
+    run_recovery_command_owned(
+        "nmcli",
+        &[
+            "connection".into(),
+            "modify".into(),
+            profile.into(),
+            "connection.autoconnect".into(),
+            if enabled { "yes" } else { "no" }.into(),
+        ],
+        Duration::from_secs(10),
+    )
+    .await?;
+    Ok(())
 }
 
 async fn run_recovery_command(program: &str, args: &[&str]) -> Result<String, String> {

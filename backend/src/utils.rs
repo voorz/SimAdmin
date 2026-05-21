@@ -263,26 +263,39 @@ pub fn format_uptime(seconds: u64) -> String {
 ///
 /// # Arguments
 /// * `interface` - 网络接口名称（如 usb0, eth0）
+/// * `conn` - 可选的 D-Bus 连接用于蜂窝接口流量补足 fallback
 ///
 /// # Returns
 /// (rx_bytes, tx_bytes)
-pub fn read_interface_stats(interface: &str) -> Result<(u64, u64), String> {
+pub async fn read_interface_stats(
+    interface: &str,
+    conn: Option<&zbus::Connection>,
+) -> Result<(u64, u64), String> {
     use std::fs;
 
     let rx_path = format!("/sys/class/net/{}/statistics/rx_bytes", interface);
     let tx_path = format!("/sys/class/net/{}/statistics/tx_bytes", interface);
 
-    let rx_bytes = fs::read_to_string(&rx_path)
+    let mut rx_bytes = fs::read_to_string(&rx_path)
         .map_err(|e| format!("Failed to read {}: {}", rx_path, e))?
         .trim()
         .parse::<u64>()
         .map_err(|e| format!("Failed to parse rx_bytes: {}", e))?;
 
-    let tx_bytes = fs::read_to_string(&tx_path)
+    let mut tx_bytes = fs::read_to_string(&tx_path)
         .map_err(|e| format!("Failed to read {}: {}", tx_path, e))?
         .trim()
         .parse::<u64>()
         .map_err(|e| format!("Failed to parse tx_bytes: {}", e))?;
+
+    if let Some(c) = conn {
+        if let Ok(Some(mm_stats)) =
+            crate::modem_manager::get_bearer_stats_for_interface(c, interface).await
+        {
+            rx_bytes = std::cmp::max(rx_bytes, mm_stats.rx_bytes);
+            tx_bytes = std::cmp::max(tx_bytes, mm_stats.tx_bytes);
+        }
+    }
 
     Ok((rx_bytes, tx_bytes))
 }
@@ -973,7 +986,9 @@ fn read_interface_ip_addresses(
 }
 
 /// 读取所有网络接口信息
-pub fn read_network_interfaces() -> Result<Vec<NetworkInterfaceInfo>, String> {
+pub async fn read_network_interfaces(
+    conn: Option<&zbus::Connection>,
+) -> Result<Vec<NetworkInterfaceInfo>, String> {
     use std::fs;
     use std::path::Path;
 
@@ -984,6 +999,13 @@ pub fn read_network_interfaces() -> Result<Vec<NetworkInterfaceInfo>, String> {
     }
 
     let mut interfaces = Vec::new();
+    let bearer_stats_by_interface = if let Some(c) = conn {
+        crate::modem_manager::get_bearer_stats_by_interface(c)
+            .await
+            .unwrap_or_default()
+    } else {
+        std::collections::HashMap::new()
+    };
 
     // 遍历所有网络接口
     let entries = fs::read_dir(sys_class_net)
@@ -995,7 +1017,7 @@ pub fn read_network_interfaces() -> Result<Vec<NetworkInterfaceInfo>, String> {
         let interface_path = entry.path();
 
         // 读取接口状态
-        let status = fs::read_to_string(interface_path.join("operstate"))
+        let mut status = fs::read_to_string(interface_path.join("operstate"))
             .unwrap_or_else(|_| "unknown".to_string())
             .trim()
             .to_lowercase();
@@ -1014,22 +1036,35 @@ pub fn read_network_interfaces() -> Result<Vec<NetworkInterfaceInfo>, String> {
 
         // 读取统计信息
         let stats_path = interface_path.join("statistics");
-        let rx_bytes = fs::read_to_string(stats_path.join("rx_bytes"))
+        let mut rx_bytes = fs::read_to_string(stats_path.join("rx_bytes"))
             .ok()
             .and_then(|s| s.trim().parse::<u64>().ok())
             .unwrap_or(0);
-        let tx_bytes = fs::read_to_string(stats_path.join("tx_bytes"))
+        let mut tx_bytes = fs::read_to_string(stats_path.join("tx_bytes"))
             .ok()
             .and_then(|s| s.trim().parse::<u64>().ok())
             .unwrap_or(0);
-        let rx_packets = fs::read_to_string(stats_path.join("rx_packets"))
+
+        let bearer_stats = bearer_stats_by_interface.get(&interface_name).copied();
+        if let Some(mm_stats) = bearer_stats {
+            rx_bytes = std::cmp::max(rx_bytes, mm_stats.rx_bytes);
+            tx_bytes = std::cmp::max(tx_bytes, mm_stats.tx_bytes);
+        }
+
+        let mut rx_packets = fs::read_to_string(stats_path.join("rx_packets"))
             .ok()
             .and_then(|s| s.trim().parse::<u64>().ok())
             .unwrap_or(0);
-        let tx_packets = fs::read_to_string(stats_path.join("tx_packets"))
+        let mut tx_packets = fs::read_to_string(stats_path.join("tx_packets"))
             .ok()
             .and_then(|s| s.trim().parse::<u64>().ok())
             .unwrap_or(0);
+
+        if let Some(mm_stats) = bearer_stats {
+            rx_packets = std::cmp::max(rx_packets, mm_stats.rx_packets);
+            tx_packets = std::cmp::max(tx_packets, mm_stats.tx_packets);
+        }
+
         let rx_errors = fs::read_to_string(stats_path.join("rx_errors"))
             .ok()
             .and_then(|s| s.trim().parse::<u64>().ok())
@@ -1042,6 +1077,32 @@ pub fn read_network_interfaces() -> Result<Vec<NetworkInterfaceInfo>, String> {
         // 读取IP地址信息
         let ip_addresses =
             read_interface_ip_addresses(&interface_name, status != "down").unwrap_or_default();
+
+        // 如果操作状态为 unknown，检查 flags 和 carrier/IP 来判定是否实际处于 up 状态
+        if status == "unknown" {
+            let flags = fs::read_to_string(interface_path.join("flags"))
+                .ok()
+                .and_then(|s| {
+                    let s = s.trim();
+                    if s.starts_with("0x") {
+                        u32::from_str_radix(&s[2..], 16).ok()
+                    } else {
+                        s.parse::<u32>().ok()
+                    }
+                })
+                .unwrap_or(0);
+
+            // 检查 IFF_UP (0x1) 标志是否设置
+            if (flags & 0x1) != 0 {
+                let carrier = fs::read_to_string(interface_path.join("carrier"))
+                    .ok()
+                    .map(|s| s.trim().to_string())
+                    .unwrap_or_default();
+                if carrier == "1" || !ip_addresses.is_empty() {
+                    status = "up".to_string();
+                }
+            }
+        }
 
         interfaces.push(NetworkInterfaceInfo {
             name: interface_name,

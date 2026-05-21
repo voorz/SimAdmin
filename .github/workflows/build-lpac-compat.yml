@@ -197,8 +197,8 @@ jobs:
             * **Glibc version**: `2.31` (Debian 11)
             * **Architecture**: `aarch64` (ARM64)
           draft: false
-          prerelease: false
-          make_latest: false
+          prerelease: true # 标记为预发布版，防止其成为最新版
+          make_latest: false # ⚠️ 重要：请勿修改为 true！此 workflow 仅打包兼容版 lpac 静态资源，非项目主版本 Release，决不能发布为 Latest。
           files: |
             release/lpac-linux-aarch64-glibc2.31.zip
             release/lpac.json
