@@ -255,6 +255,25 @@ pub struct VersionUpdateNotificationConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub struct SecurityConfig {
+    #[serde(default = "default_true")]
+    pub password_protection_enabled: bool,
+    #[serde(default = "default_password_min_length")]
+    pub password_min_length: u8,
+    #[serde(default = "default_true")]
+    pub password_require_letters: bool,
+    #[serde(default = "default_true")]
+    pub password_require_digits: bool,
+    #[serde(default = "default_true")]
+    pub password_require_symbols: bool,
+    #[serde(default = "default_session_ttl_seconds")]
+    pub session_ttl_seconds: i64,
+    #[serde(default = "default_idle_timeout_seconds")]
+    pub idle_timeout_seconds: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct DdnsConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -547,6 +566,20 @@ impl Default for VersionUpdateNotificationConfig {
     }
 }
 
+impl Default for SecurityConfig {
+    fn default() -> Self {
+        Self {
+            password_protection_enabled: true,
+            password_min_length: default_password_min_length(),
+            password_require_letters: true,
+            password_require_digits: true,
+            password_require_symbols: true,
+            session_ttl_seconds: default_session_ttl_seconds(),
+            idle_timeout_seconds: default_idle_timeout_seconds(),
+        }
+    }
+}
+
 impl Default for DdnsConfig {
     fn default() -> Self {
         Self {
@@ -655,6 +688,18 @@ fn default_data_enabled() -> bool {
     false
 }
 
+fn default_password_min_length() -> u8 {
+    8
+}
+
+fn default_session_ttl_seconds() -> i64 {
+    7 * 24 * 60 * 60
+}
+
+fn default_idle_timeout_seconds() -> i64 {
+    60 * 60
+}
+
 fn default_apn_protocol() -> String {
     "dual".to_string()
 }
@@ -718,6 +763,8 @@ pub struct AppConfig {
     pub device_network: DeviceNetworkConfig,
     #[serde(default)]
     pub version_update_notifications: VersionUpdateNotificationConfig,
+    #[serde(default)]
+    pub security: SecurityConfig,
     /// 是否允许蜂窝数据漫游（写入 ModemManager Simple.Connect 的 allow-roaming）
     #[serde(default = "default_roaming_allowed")]
     pub roaming_allowed: bool,
@@ -738,6 +785,7 @@ impl Default for AppConfig {
             notifications: NotificationConfig::default(),
             device_network: DeviceNetworkConfig::default(),
             version_update_notifications: VersionUpdateNotificationConfig::default(),
+            security: SecurityConfig::default(),
             roaming_allowed: default_roaming_allowed(),
             data_enabled: default_data_enabled(),
             apn: ApnConfig::default(),
@@ -838,6 +886,18 @@ impl ConfigManager {
             .unwrap()
             .version_update_notifications
             .clone()
+    }
+
+    pub fn get_security(&self) -> SecurityConfig {
+        self.config.read().unwrap().security.clone()
+    }
+
+    pub fn set_security(&self, security: SecurityConfig) -> Result<(), String> {
+        {
+            let mut c = self.config.write().unwrap();
+            c.security = security;
+        }
+        self.save()
     }
 
     pub fn set_data_enabled(&self, enabled: bool) -> Result<(), String> {

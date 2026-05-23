@@ -457,6 +457,25 @@ impl Database {
         Ok(count > 0)
     }
 
+    pub fn delete_auth_session(&self, session_hash: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "DELETE FROM auth_sessions WHERE session_hash = ?1",
+            params![session_hash],
+        )?;
+        Ok(())
+    }
+
+    pub fn refresh_auth_session(&self, session_hash: &str, ttl_seconds: i64) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let now = Utc::now().timestamp();
+        conn.execute(
+            "UPDATE auth_sessions SET expires_at = ?1 WHERE session_hash = ?2",
+            params![now + ttl_seconds, session_hash],
+        )?;
+        Ok(())
+    }
+
     // ==================== 短信相关方法 ====================
 
     /// 插入新短信

@@ -283,8 +283,10 @@ async fn main() -> Result<()> {
     }
     if let Some(CliCommand::Auth { command }) = &cli.command {
         let db = Database::new(get_data_db_path())?;
+        let config_manager = ConfigManager::new(get_default_config_path());
+        let security = config_manager.get_security();
         return match command {
-            AuthCommand::ResetPassword => auth::reset_admin_password_interactive(&db),
+            AuthCommand::ResetPassword => auth::reset_admin_password_interactive(&db, &security),
             AuthCommand::Clear => auth::clear_admin_auth(&db),
         };
     }
@@ -800,6 +802,12 @@ async fn main() -> Result<()> {
             "/api/auth/password",
             post(auth::change_password).options(options_handler),
         )
+        .route(
+            "/api/auth/settings",
+            get(auth::get_settings)
+                .post(auth::set_settings)
+                .options(options_handler),
+        )
         .route_layer(middleware::from_fn_with_state(
             app_state.clone(),
             auth::auth_middleware,
@@ -818,6 +826,10 @@ async fn main() -> Result<()> {
         .route(
             "/api/auth/login",
             post(auth::login).options(options_handler),
+        )
+        .route(
+            "/api/auth/logout",
+            post(auth::logout).options(options_handler),
         )
         .merge(protected_routes)
         .with_state(app_state)

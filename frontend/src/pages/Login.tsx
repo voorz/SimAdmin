@@ -5,12 +5,10 @@ import {
   Box,
   Button,
   Card,
-  Chip,
   CircularProgress,
   IconButton,
   InputBase,
   Link,
-  LinearProgress,
   Stack,
   Tooltip,
   Typography,
@@ -23,123 +21,22 @@ import {
   Star as StarIcon,
 } from '@mui/icons-material'
 import { api } from '../api/current'
+import type { SecurityConfig } from '../api/types'
+import { PasswordStrengthHint } from '../components/PasswordStrengthHint'
+import {
+  DEFAULT_SECURITY_SETTINGS,
+  PASSWORD_MAX_LENGTH,
+  analyzePassword,
+  enabledPasswordTypesText,
+  normalizePasswordInput,
+} from '../lib/passwordPolicy'
 import communityQrUrl from '../../../static/Community/Community_QQ_Light.png'
 
 type AuthMode = 'login' | 'setup'
-type PasswordStrength = 'weak' | 'medium' | 'strong'
-
-const PASSWORD_MAX_LENGTH = 64
 
 function getNextPath(next: string | null) {
   if (!next || !next.startsWith('/') || next.startsWith('/login')) return '/'
   return next
-}
-
-function isAllowedPasswordChar(char: string) {
-  return /^[\x21-\x7E]$/.test(char)
-}
-
-function normalizePasswordInput(value: string) {
-  return Array.from(value)
-    .filter(isAllowedPasswordChar)
-    .join('')
-    .slice(0, PASSWORD_MAX_LENGTH)
-}
-
-function getPasswordCategories(password: string) {
-  return {
-    lower: /[a-z]/.test(password),
-    upper: /[A-Z]/.test(password),
-    digit: /\d/.test(password),
-    symbol: /[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~]/.test(password),
-  }
-}
-
-function analyzePassword(password: string) {
-  const categories = getPasswordCategories(password)
-  const categoryCount = Object.values(categories).filter(Boolean).length
-  const lengthOk = password.length >= 8 && password.length <= PASSWORD_MAX_LENGTH
-  const charsOk = password.length > 0 && password === normalizePasswordInput(password)
-  const mixedOk = categoryCount >= 2
-  let score = 0
-  if (lengthOk) score += 1
-  if (mixedOk) score += 1
-  if (password.length >= 12) score += 1
-  if (categoryCount >= 3) score += 1
-  const strength: PasswordStrength = score >= 4 ? 'strong' : score >= 2 ? 'medium' : 'weak'
-
-  return {
-    categoryCount,
-    lengthOk,
-    charsOk,
-    mixedOk,
-    valid: lengthOk && charsOk && mixedOk,
-    strength,
-  }
-}
-
-function strengthLabel(strength: PasswordStrength) {
-  if (strength === 'strong') return '强'
-  if (strength === 'medium') return '中'
-  return '弱'
-}
-
-function strengthColor(strength: PasswordStrength): 'error' | 'warning' | 'success' {
-  if (strength === 'strong') return 'success'
-  if (strength === 'medium') return 'warning'
-  return 'error'
-}
-
-function PasswordStrengthHint({ password }: { password: string }) {
-  if (!password) return null
-
-  const analysis = analyzePassword(password)
-  const progress = analysis.strength === 'strong' ? 100 : analysis.strength === 'medium' ? 62 : 28
-
-  const rules = [
-    { ok: analysis.lengthOk, label: '8-64 个字符' },
-    { ok: analysis.charsOk, label: '仅限英文字母、数字和符号' },
-    { ok: analysis.mixedOk, label: '至少包含两类字符' },
-  ]
-
-  return (
-    <Stack
-      spacing={1}
-      sx={{
-        ml: { xs: 1.5, sm: 2 },
-        mr: 1,
-        width: { xs: 'calc(100% - 20px)', sm: 'calc(100% - 24px)' },
-      }}
-    >
-      <Stack direction="row" spacing={1} alignItems="center">
-        <Typography variant="caption" color="text.secondary">密码强度</Typography>
-        <Chip
-          size="small"
-          color={strengthColor(analysis.strength)}
-          label={strengthLabel(analysis.strength)}
-          sx={{ height: 20, borderRadius: 1, fontSize: 12 }}
-        />
-      </Stack>
-      <LinearProgress
-        variant="determinate"
-        value={progress}
-        color={strengthColor(analysis.strength)}
-        sx={{ height: 6, borderRadius: 999, bgcolor: 'action.hover' }}
-      />
-      <Stack spacing={0.4}>
-        {rules.map((rule) => (
-          <Typography
-            key={rule.label}
-            variant="caption"
-            color={rule.ok ? 'success.main' : 'text.secondary'}
-            sx={{ lineHeight: 1.45 }}
-          >
-            {rule.ok ? '✓' : '•'} {rule.label}
-          </Typography>
-        ))}
-      </Stack>
-    </Stack>
-  )
 }
 
 function LogoMark({ active }: { active: boolean }) {
@@ -235,6 +132,74 @@ function CommunityTooltip() {
   )
 }
 
+function ForgotPasswordTooltip({ visible }: { visible: boolean }) {
+  return (
+    <Tooltip
+      arrow
+      placement="top-end"
+      slotProps={{
+        tooltip: {
+          sx: {
+            p: 0,
+            maxWidth: 360,
+            bgcolor: 'rgba(255,255,255,0.94)',
+            color: '#334155',
+            border: '1px solid rgba(226,232,240,0.9)',
+            boxShadow: '0 18px 48px -24px rgba(15,23,42,0.38)',
+            backdropFilter: 'blur(18px)',
+            WebkitBackdropFilter: 'blur(18px)',
+          },
+        },
+        arrow: {
+          sx: {
+            color: 'rgba(255,255,255,0.94)',
+            '&::before': {
+              border: '1px solid rgba(226,232,240,0.9)',
+              boxSizing: 'border-box',
+            },
+          },
+        },
+      }}
+      title={(
+        <Stack spacing={1} sx={{ p: 1.5 }}>
+          <Typography variant="body2">
+            忘记密码可通过 ADB/SSH 登录设备执行命令操作
+          </Typography>
+          <Typography variant="caption" component="div" sx={{ color: 'text.secondary', lineHeight: 1.7 }}>
+            重置密码：
+            <Box component="code" sx={{ fontFamily: 'monospace', color: 'text.primary' }}>
+              /opt/simadmin/simadmin auth reset-password
+            </Box>
+          </Typography>
+          <Typography variant="caption" component="div" sx={{ color: 'text.secondary', lineHeight: 1.7 }}>
+            清除密码：
+            <Box component="code" sx={{ fontFamily: 'monospace', color: 'text.primary' }}>
+              /opt/simadmin/simadmin auth clear
+            </Box>
+          </Typography>
+        </Stack>
+      )}
+    >
+      <Link
+        component="button"
+        type="button"
+        tabIndex={visible ? 0 : -1}
+        underline="none"
+        color="text.secondary"
+        sx={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          fontSize: 13,
+          fontWeight: 400,
+          '&:hover': { color: 'primary.main' },
+        }}
+      >
+        忘记密码
+      </Link>
+    </Tooltip>
+  )
+}
+
 export default function Login() {
   const theme = useTheme()
   const navigate = useNavigate()
@@ -247,23 +212,27 @@ export default function Login() {
   const [loading, setLoading] = useState(false)
   const [checking, setChecking] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const passwordAnalysis = useMemo(() => analyzePassword(password), [password])
+  const [authSettings, setAuthSettings] = useState<SecurityConfig>(DEFAULT_SECURITY_SETTINGS)
+  const [showForgotPassword, setShowForgotPassword] = useState(false)
+  const passwordAnalysis = useMemo(() => analyzePassword(password, authSettings), [authSettings, password])
 
   const handlePasswordChange = (value: string) => {
-    const normalized = normalizePasswordInput(value)
+    const normalized = normalizePasswordInput(value, mode === 'setup' ? authSettings : undefined)
     setPassword(normalized)
+    setShowForgotPassword(false)
     if (value !== normalized) {
-      setError('密码只能包含英文字母、数字和符号，不能包含空格或中文。')
+      const allowedText = mode === 'setup' ? enabledPasswordTypesText(authSettings) : '英文字母、数字和符号'
+      setError(`密码只能包含${allowedText}，不能包含空格或中文。`)
     } else if (error?.includes('不能包含空格或中文')) {
       setError(null)
     }
   }
 
   const handleConfirmPasswordChange = (value: string) => {
-    const normalized = normalizePasswordInput(value)
+    const normalized = normalizePasswordInput(value, authSettings)
     setConfirmPassword(normalized)
     if (value !== normalized) {
-      setError('密码只能包含英文字母、数字和符号，不能包含空格或中文。')
+      setError(`密码只能包含${enabledPasswordTypesText(authSettings)}，不能包含空格或中文。`)
     } else if (error?.includes('不能包含空格或中文')) {
       setError(null)
     }
@@ -275,6 +244,7 @@ export default function Login() {
       .then((response) => {
         if (cancelled) return
         const status = response.data
+        if (status?.settings) setAuthSettings(status.settings)
         if (status?.authenticated) {
           void navigate(nextPath, { replace: true })
           return
@@ -293,27 +263,29 @@ export default function Login() {
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setError(null)
+    setShowForgotPassword(false)
 
     if (!password) {
       setError(mode === 'setup' ? '请设置管理员密码。' : '请输入管理员密码。')
       return
     }
 
-    if (!passwordAnalysis.lengthOk) {
-      setError('密码长度需为 8-64 个字符。')
-      return
-    }
-
-    if (mode === 'setup' && !passwordAnalysis.valid) {
-      setError('密码不符合安全要求，请根据上方规则调整。')
-      return
+    if (mode === 'setup') {
+      if (!passwordAnalysis.charsOk) {
+        setError(`密码只能包含${enabledPasswordTypesText(authSettings)}，不能包含空格或中文。`)
+        return
+      }
+      if (!passwordAnalysis.lengthOk) {
+        setError(`密码长度需为 ${authSettings.password_min_length}-${PASSWORD_MAX_LENGTH} 个字符。`)
+        return
+      }
+      if (!passwordAnalysis.valid) {
+        setError('密码不符合安全要求，请根据上方规则调整。')
+        return
+      }
     }
     if (mode === 'setup' && password !== confirmPassword) {
       setError('两次输入的密码不一致')
-      return
-    }
-    if (password.length < 8) {
-      setError('密码至少需要 8 个字符')
       return
     }
 
@@ -326,7 +298,11 @@ export default function Login() {
       }
       void navigate(nextPath, { replace: true })
     } catch (err) {
-      setError(err instanceof Error ? err.message : '登录失败')
+      const message = err instanceof Error ? err.message : '登录失败'
+      setError(message)
+      if (mode === 'login' && message.includes('密码不正确')) {
+        setShowForgotPassword(true)
+      }
     } finally {
       setLoading(false)
     }
@@ -371,7 +347,14 @@ export default function Login() {
           </Typography>
         </Stack>
 
-        <Card sx={{ width: '100%', p: { xs: 3, sm: 4 }, borderRadius: 3 }}>
+        <Card
+          sx={{
+            width: '100%',
+            p: { xs: 3, sm: 4 },
+            borderRadius: 3,
+            position: 'relative',
+          }}
+        >
           {checking ? (
             <Box sx={{ minHeight: 318, display: 'grid', placeItems: 'center' }}>
               <CircularProgress size={30} />
@@ -426,7 +409,7 @@ export default function Login() {
                   )}
                 </Box>
 
-                {mode === 'setup' && <PasswordStrengthHint password={password} />}
+                {mode === 'setup' && <PasswordStrengthHint password={password} settings={authSettings} />}
 
                 {mode === 'setup' && (
                   <>
@@ -469,25 +452,43 @@ export default function Login() {
 
               {error && <Alert severity="error" sx={{ width: '100%' }}>{error}</Alert>}
 
-              <Link
-                href="https://github.com/3899/SimAdmin"
-                target="_blank"
-                rel="noopener noreferrer"
-                underline="none"
-                color="text.secondary"
-                sx={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 0.75,
-                  fontSize: 14,
-                  fontWeight: 600,
-                  '&:hover': { color: 'primary.main' },
-                }}
-              >
-                <GitHubIcon sx={{ fontSize: 18 }} />
-                点亮 Star
-                <StarIcon sx={{ fontSize: 18, color: '#facc15' }} />
-              </Link>
+              <Box sx={{ width: '100%', minHeight: 24, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Link
+                  href="https://github.com/3899/SimAdmin"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  underline="none"
+                  color="text.secondary"
+                  sx={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 0.75,
+                    fontSize: 14,
+                    fontWeight: 600,
+                    '&:hover': { color: 'primary.main' },
+                  }}
+                >
+                  <GitHubIcon sx={{ fontSize: 18 }} />
+                  点亮 Star
+                  <StarIcon sx={{ fontSize: 18, color: '#facc15' }} />
+                </Link>
+                {mode === 'login' && (
+                  <Box
+                    sx={{
+                      position: 'absolute',
+                      right: 0,
+                      top: '50%',
+                      opacity: showForgotPassword ? 1 : 0,
+                      pointerEvents: showForgotPassword ? 'auto' : 'none',
+                      transform: showForgotPassword ? 'translateY(-50%)' : 'translate(8px, -50%)',
+                      transition: 'opacity 180ms ease, transform 180ms ease',
+                    }}
+                    aria-hidden={!showForgotPassword}
+                  >
+                    <ForgotPasswordTooltip visible={showForgotPassword} />
+                  </Box>
+                )}
+              </Box>
             </Stack>
           )}
         </Card>

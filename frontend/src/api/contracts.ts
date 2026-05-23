@@ -7,6 +7,22 @@ export interface ApiResponse<T> {
 export interface AuthStatusResponse {
   configured: boolean
   authenticated: boolean
+  settings?: SecurityConfig
+}
+
+export interface SecurityConfig {
+  password_protection_enabled: boolean
+  password_min_length: number
+  password_require_letters: boolean
+  password_require_digits: boolean
+  password_require_symbols: boolean
+  session_ttl_seconds: number
+  idle_timeout_seconds: number
+}
+
+export interface AuthSettingsResponse {
+  configured: boolean
+  settings: SecurityConfig
 }
 
 export interface LoginRequest {
@@ -14,7 +30,6 @@ export interface LoginRequest {
 }
 
 export interface ChangePasswordRequest {
-  current_password: string
   new_password: string
 }
 

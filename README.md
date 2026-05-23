@@ -48,6 +48,10 @@
 	<br/><br/>
 	<img src="./static/Notification.png" width="100%" alt="Notification" />
 	<br/><br/>
+	<img src="./static/Basic_Configuration.png" width="100%" alt="Basic_Configuration" />
+	<br/><br/>
+	<img src="./static/Security_Settings.png" width="100%" alt="Security_Settings" />
+	<br/><br/>
 	<img src="./static/OTA.png" width="100%" alt="OTA" />
 	<br/><br/>
 	<img src="./static/Dashboard_Dark.png" width="100%" alt="Dashboard_Dark" />
@@ -434,11 +438,14 @@ journalctl -u simadmin -f
 
 - 短信管理加入常驻搜索框，支持按号码、短信内容检索会话；匹配项可自动高亮检索关键词。
 - 短信统计新增推送数据统计，直观展示推送成功、尝试推送条数。
+- 新增系统配置「安全性」页面，支持启用密码保护、修改管理员密码、密码策略、会话有效期和空闲超时设置。
 
 #### 💫 体验优化
 
 - 精简短信统计面板，隐藏总计数据，保留收发统计，新增独立推送统计卡片，支持悬停查看数据说明。
 - 持久化存储短信转发状态，过滤无效异常数据，保证推送统计结果准确可靠。
+- 优化登录页和首次设置密码页视觉效果，补充忘记密码提示。
+- 支持按已保存的密码策略校验新密码，并提供密码强度提示。
 
 ### 📌 v1.0.7
 
@@ -834,7 +841,6 @@ busctl introspect org.freedesktop.ModemManager1 /org/freedesktop/ModemManager1/M
 
 ```json
 {
-  "current_password": "OldPassword123!",
   "new_password": "NewPassword123!"
 }
 ```

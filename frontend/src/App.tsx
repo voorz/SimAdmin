@@ -6,7 +6,9 @@ import { ThemeProvider } from './contexts/ThemeContext'
 import { WorkModeProvider, useWorkMode } from './contexts/WorkModeContext'
 import { queryClient } from './lib/queryClient'
 import MainLayout from './components/Layout/MainLayout'
-import { api } from './api/current'
+import { api, type AuthStatusResponse } from './api/current'
+
+const SECURITY_SETTINGS_UPDATED_EVENT = 'simadmin-security-settings-updated'
 
 // 路由级别代码分割 - 按需加载页面组件
 const Dashboard = lazy(() => import('./pages/Dashboard'))
@@ -45,21 +47,70 @@ function ProtectedShell() {
   const location = useLocation()
   const [checking, setChecking] = useState(true)
   const [allowed, setAllowed] = useState(false)
+  const [authStatus, setAuthStatus] = useState<AuthStatusResponse | null>(null)
 
   useEffect(() => {
     let cancelled = false
     api.getAuthStatus()
       .then((response) => {
-        if (!cancelled) setAllowed(response.data?.authenticated === true)
+        if (cancelled) return
+        setAuthStatus(response.data ?? null)
+        setAllowed(response.data?.authenticated === true)
       })
       .catch(() => {
-        if (!cancelled) setAllowed(false)
+        if (!cancelled) {
+          setAuthStatus(null)
+          setAllowed(false)
+        }
       })
       .finally(() => {
         if (!cancelled) setChecking(false)
       })
     return () => { cancelled = true }
   }, [])
+
+  useEffect(() => {
+    const handleSecuritySettingsUpdated = (event: Event) => {
+      const settings = (event as CustomEvent<AuthStatusResponse['settings']>).detail
+      if (!settings) return
+      setAuthStatus((prev) => (prev ? { ...prev, settings } : prev))
+    }
+
+    window.addEventListener(SECURITY_SETTINGS_UPDATED_EVENT, handleSecuritySettingsUpdated)
+    return () => window.removeEventListener(SECURITY_SETTINGS_UPDATED_EVENT, handleSecuritySettingsUpdated)
+  }, [])
+
+  useEffect(() => {
+    const idleTimeoutSeconds = authStatus?.settings?.idle_timeout_seconds ?? 0
+    const passwordProtectionEnabled = authStatus?.settings?.password_protection_enabled ?? true
+    if (!allowed || !passwordProtectionEnabled || idleTimeoutSeconds <= 0) return undefined
+
+    let timer: number | undefined
+    const redirectToLogin = () => {
+      const next = `${window.location.pathname}${window.location.search}`
+      window.location.assign(next === '/' ? '/login' : `/login?next=${encodeURIComponent(next)}`)
+    }
+    const logoutForIdle = () => {
+      void api.logout().finally(redirectToLogin)
+    }
+    const resetTimer = () => {
+      if (timer !== undefined) window.clearTimeout(timer)
+      timer = window.setTimeout(logoutForIdle, idleTimeoutSeconds * 1000)
+    }
+    const events = ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart']
+
+    events.forEach((eventName) => window.addEventListener(eventName, resetTimer))
+    resetTimer()
+
+    return () => {
+      if (timer !== undefined) window.clearTimeout(timer)
+      events.forEach((eventName) => window.removeEventListener(eventName, resetTimer))
+    }
+  }, [
+    allowed,
+    authStatus?.settings?.idle_timeout_seconds,
+    authStatus?.settings?.password_protection_enabled,
+  ])
 
   if (checking) return <PageLoading />
   if (!allowed) {

@@ -3,6 +3,7 @@ import type {
   AirplaneModeResponse,
   ApiResponse,
   ApnListResponse,
+  AuthSettingsResponse,
   AuthStatusResponse,
   BandLockRequest,
   BandLockStatus,
@@ -46,6 +47,7 @@ import type {
   RadioModeResponse,
   RoamingRequest,
   RoamingResponse,
+  SecurityConfig,
   SetApnRequest,
   SignalStrengthResponse,
   SimInfo,
@@ -188,14 +190,32 @@ class SimAdminCurrentAPI {
     })
   }
 
-  async changeAdminPassword(currentPassword: string, newPassword: string) {
+  async changeAdminPassword(newPassword: string) {
     const body: ChangePasswordRequest = {
-      current_password: currentPassword,
       new_password: newPassword,
     }
     return request<ApiResponse<null>>('/auth/password', {
       method: 'POST',
       body: JSON.stringify(body),
+    })
+  }
+
+  async getAuthSettings() {
+    return request<ApiResponse<AuthSettingsResponse>>('/auth/settings')
+  }
+
+  async setAuthSettings(settings: SecurityConfig) {
+    return request<ApiResponse<SecurityConfig>>('/auth/settings', {
+      method: 'POST',
+      body: JSON.stringify(settings),
+    })
+  }
+
+  async logout() {
+    return request<ApiResponse<null>>('/auth/logout', {
+      method: 'POST',
+      body: JSON.stringify({}),
+      skipAuthRedirect: true,
     })
   }
 

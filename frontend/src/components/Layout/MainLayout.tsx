@@ -4,6 +4,7 @@ import { Box, useMediaQuery, useTheme, type Theme } from '@mui/material'
 import Sidebar from './Sidebar'
 import TopBar from './TopBar'
 import { RefreshContext } from '../../contexts/RefreshContext'
+import { LAYOUT_BOTTOM_ACTION_BAR_HEIGHT, LAYOUT_BOTTOM_ACTION_BAR_ID } from './layoutConstants'
 
 const DRAWER_WIDTH = 224
 const DRAWER_MINI_WIDTH = 64
@@ -105,6 +106,28 @@ export default function MainLayout() {
           >
             <Outlet />
           </Box>
+
+          <Box
+            id={LAYOUT_BOTTOM_ACTION_BAR_ID}
+            sx={(currentTheme) => ({
+              flexShrink: 0,
+              '&:empty': {
+                display: 'none',
+              },
+              '&:not(:empty)': {
+                alignItems: 'center',
+                bgcolor: 'transparent',
+                borderTop: '1px solid',
+                borderColor: currentTheme.palette.mode === 'light'
+                  ? 'rgba(226,232,240,0.72)'
+                  : 'rgba(148,163,184,0.18)',
+                display: 'flex',
+                height: LAYOUT_BOTTOM_ACTION_BAR_HEIGHT,
+                minHeight: LAYOUT_BOTTOM_ACTION_BAR_HEIGHT,
+                px: { xs: 2, sm: 3 },
+              },
+            })}
+          />
         </Box>
       </Box>
     </RefreshContext.Provider>
