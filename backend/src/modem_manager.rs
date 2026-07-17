@@ -845,6 +845,15 @@ fn sms_storage_cache_entry_for_identity(
     db.get_sms_storage_cache(&[identity_key]).ok().flatten()
 }
 
+/// 缓存的存储条目若无 total（此前抓取失败写入的 "empty" 占位），视为不完整。
+/// 仅用于后台刷新流程内部的重试判断；不影响 sim_details_cache_missing 的
+/// 自动触发语义（空占位在 ICCID 变化前不重复触发探测）。
+fn sms_storage_cache_incomplete(db: &Database, identity: &SimIdentity) -> bool {
+    sms_storage_cache_entry_for_identity(db, identity)
+        .map(|entry| entry.sms_total.is_none())
+        .unwrap_or(true)
+}
+
 fn cache_sms_storage_for_identity(
     db: &Database,
     identity: &SimIdentity,
@@ -1870,7 +1879,7 @@ async fn refresh_sim_details_background_inner(conn: &Connection, db: &Database, 
         cache_smsc_for_identity(db, &identity, &sms_center, source);
     }
 
-    if force || sms_storage_cache_entry_for_identity(db, &identity).is_none() {
+    if force || sms_storage_cache_incomplete(db, &identity) {
         let mut storage = None;
         if let Some(path) = modem_path.as_deref() {
             if let Ok(output) = send_at_via_modem_command(conn, path, "AT+CPMS?").await {
@@ -1943,36 +1952,40 @@ async fn active_protocol_smsc_fallback(conn: &Connection, modem_path: &str) -> S
     .unwrap_or_default()
 }
 
+fn parse_sms_storage_count(field: &str) -> Option<u32> {
+    let cleaned: String = field
+        .trim_matches('"')
+        .trim_matches('\'')
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    cleaned.parse::<u32>().ok()
+}
+
+/// 解析 AT+CPMS? 回复中的短信存储用量。
+/// 优先取 SIM 卡存储（"SM"）；部分模组默认存储为模组内存（"ME"），
+/// 回复中不含 "SM" 三元组，此时回退取第一个有效存储。
 fn parse_sms_storage_info(at_output: &str) -> Option<(u32, u32)> {
-    if let Some(pos) = at_output.find("+CPMS:") {
-        let line = &at_output[pos + 6..];
-        let parts: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
-        for chunk in parts.chunks(3) {
-            if chunk.len() >= 3 {
-                let mem = chunk[0].trim_matches('"').trim_matches('\'');
+    let pos = at_output.find("+CPMS:")?;
+    let line = &at_output[pos + 6..];
+    let parts: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
+    let mut fallback = None;
+    for chunk in parts.chunks(3) {
+        if chunk.len() >= 3 {
+            let mem = chunk[0].trim_matches('"').trim_matches('\'');
+            let used = parse_sms_storage_count(chunk[1]);
+            let total = parse_sms_storage_count(chunk[2]);
+            if let (Some(u), Some(t)) = (used, total) {
                 if mem == "SM" {
-                    let used_clean: String = chunk[1]
-                        .trim_matches('"')
-                        .trim_matches('\'')
-                        .chars()
-                        .take_while(|c| c.is_ascii_digit())
-                        .collect();
-                    let total_clean: String = chunk[2]
-                        .trim_matches('"')
-                        .trim_matches('\'')
-                        .chars()
-                        .take_while(|c| c.is_ascii_digit())
-                        .collect();
-                    let used = used_clean.parse::<u32>().ok();
-                    let total = total_clean.parse::<u32>().ok();
-                    if let (Some(u), Some(t)) = (used, total) {
-                        return Some((u, t));
-                    }
+                    return Some((u, t));
+                }
+                if fallback.is_none() {
+                    fallback = Some((u, t));
                 }
             }
         }
     }
-    None
+    fallback
 }
 
 pub async fn get_sim_info_data_with_cache(
@@ -2732,8 +2745,9 @@ LTE Timing Advance: 'unavailable'"#;
         let output_2 = "+CPMS: \"ME\",5,50,\"SM\",10,30\n\rOK";
         assert_eq!(parse_sms_storage_info(output_2), Some((10, 30)));
 
-        let output_invalid = "+CPMS: \"ME\",5,50";
-        assert_eq!(parse_sms_storage_info(output_invalid), None);
+        // 无 SM 三元组时回退取 ME 存储（如 QMI 直连的 Quectel 模组）
+        let output_me_only = "+CPMS: \"ME\",5,50";
+        assert_eq!(parse_sms_storage_info(output_me_only), Some((5, 50)));
     }
 
     #[test]
@@ -3038,6 +3052,85 @@ LTE Timing Advance: 'unavailable'"#;
             unsupported,
             vec!["LTE B8".to_string(), "NR n78".to_string()]
         );
+    }
+
+    #[test]
+    fn parses_sms_storage_from_sim_triple() {
+        let output = r#"+CPMS: "SM",3,50,"SM",3,50,"SM",3,50"#;
+        assert_eq!(parse_sms_storage_info(output), Some((3, 50)));
+    }
+
+    #[test]
+    fn parses_sms_storage_falls_back_to_modem_memory() {
+        // Quectel QMI 模组默认存储为 ME，回复中不含 SM 三元组
+        let output = r#"+CPMS: "ME",0,255,"ME",0,255,"ME",0,255"#;
+        assert_eq!(parse_sms_storage_info(output), Some((0, 255)));
+    }
+
+    #[test]
+    fn parses_sms_storage_prefers_sim_over_modem_memory() {
+        let output = r#"+CPMS: "ME",7,255,"SM",3,50,"ME",7,255"#;
+        assert_eq!(parse_sms_storage_info(output), Some((3, 50)));
+    }
+
+    #[test]
+    fn parses_sms_storage_rejects_garbage() {
+        assert_eq!(parse_sms_storage_info("ERROR"), None);
+        assert_eq!(parse_sms_storage_info("+CPMS: \"ME\",x,y"), None);
+    }
+
+    fn apn_ctx(path: &str, context_type: &str, apn: &str, protocol: &str, active: bool) -> ApnContext {
+        ApnContext {
+            path: path.to_string(),
+            name: path.rsplit('/').next().unwrap_or("bearer").to_string(),
+            active,
+            apn: apn.to_string(),
+            protocol: protocol.to_string(),
+            username: String::new(),
+            password: String::new(),
+            auth_method: "chap".to_string(),
+            context_type: context_type.to_string(),
+        }
+    }
+
+    #[test]
+    fn dedups_stale_data_bearers_keeps_attach() {
+        let contexts = vec![
+            apn_ctx("/mm/Bearer/0", APN_CONTEXT_TYPE_ATTACH, "MORE", "ip", true),
+            apn_ctx("/mm/Bearer/1", "internet", "more", "dual", false),
+            apn_ctx("/mm/Bearer/2", "internet", "more", "dual", false),
+        ];
+
+        let deduped = dedup_apn_contexts(contexts);
+
+        assert_eq!(deduped.len(), 2);
+        assert_eq!(deduped[0].context_type, APN_CONTEXT_TYPE_ATTACH);
+        // 两个重复的数据承载仅保留最新的
+        assert_eq!(deduped[1].path, "/mm/Bearer/2");
+    }
+
+    #[test]
+    fn dedups_data_bearers_prefers_connected() {
+        let contexts = vec![
+            apn_ctx("/mm/Bearer/1", "internet", "more", "dual", true),
+            apn_ctx("/mm/Bearer/2", "internet", "more", "dual", false),
+        ];
+
+        let deduped = dedup_apn_contexts(contexts);
+
+        assert_eq!(deduped.len(), 1);
+        assert_eq!(deduped[0].path, "/mm/Bearer/1");
+        assert!(deduped[0].active);
+    }
+
+    #[test]
+    fn keeps_distinct_apn_contexts() {
+        let contexts = vec![
+            apn_ctx("/mm/Bearer/1", "internet", "more", "dual", false),
+            apn_ctx("/mm/Bearer/2", "internet", "ims", "dual", false),
+        ];
+
+        assert_eq!(dedup_apn_contexts(contexts).len(), 2);
     }
 }
 
@@ -4470,6 +4563,9 @@ const MM_BEARER: &str = "org.freedesktop.ModemManager1.Bearer";
 const MM_BEARER_ALLOWED_AUTH_NONE: u32 = 1 << 0;
 const MM_BEARER_ALLOWED_AUTH_PAP: u32 = 1 << 1;
 const MM_BEARER_ALLOWED_AUTH_CHAP: u32 = 1 << 2;
+/// MMBearerType: LTE 初始附着承载（default-attach）
+const MM_BEARER_TYPE_DEFAULT_ATTACH: u32 = 2;
+const APN_CONTEXT_TYPE_ATTACH: &str = "attach";
 
 fn bearer_ip_type_to_protocol(v: u32) -> &'static str {
     match v {
@@ -4544,7 +4640,13 @@ pub async fn list_apn_contexts(
             .map(mm_allowed_auth_to_apn_auth_method)
             .unwrap_or("chap");
         let connected = props.get("Connected").map(extract_bool).unwrap_or(false);
-        let name = path.rsplit('/').next().unwrap_or("bearer").to_string();
+        let bearer_type = props.get("Type").map(extract_u32).unwrap_or(0);
+        let is_attach = bearer_type == MM_BEARER_TYPE_DEFAULT_ATTACH;
+        let name = if is_attach {
+            "attach".to_string()
+        } else {
+            path.rsplit('/').next().unwrap_or("bearer").to_string()
+        };
         contexts.push(ApnContext {
             path: path.clone(),
             name,
@@ -4554,7 +4656,11 @@ pub async fn list_apn_contexts(
             username: user,
             password,
             auth_method: auth_method.into(),
-            context_type: "internet".into(),
+            context_type: if is_attach {
+                APN_CONTEXT_TYPE_ATTACH.into()
+            } else {
+                "internet".into()
+            },
         });
     }
     if let Some(config) = configured_apn.filter(|config| !config.apn.trim().is_empty()) {
@@ -4568,6 +4674,7 @@ pub async fn list_apn_contexts(
             }
         }
     }
+    let mut contexts = dedup_apn_contexts(contexts);
     if contexts.is_empty() {
         let mut fallback = configured_apn
             .map(apn_config_to_simple_connect_settings)
@@ -4602,6 +4709,31 @@ pub async fn list_apn_contexts(
         });
     }
     Ok(ApnListResponse { contexts })
+}
+
+/// 去重 APN 上下文：每次拨号会在 ModemManager 中新建 bearer，旧的断开 bearer
+/// 不会被回收，导致同一 APN/协议出现多个重复条目。同键仅保留一个：
+/// 优先已连接者，否则保留最新出现的。附着承载（attach）单独展示，不参与去重。
+fn dedup_apn_contexts(contexts: Vec<ApnContext>) -> Vec<ApnContext> {
+    let mut result: Vec<ApnContext> = Vec::new();
+    for ctx in contexts {
+        if ctx.context_type == APN_CONTEXT_TYPE_ATTACH {
+            result.push(ctx);
+            continue;
+        }
+        let key = (ctx.apn.trim().to_ascii_lowercase(), ctx.protocol.clone());
+        if let Some(existing) = result.iter_mut().find(|c| {
+            c.context_type != APN_CONTEXT_TYPE_ATTACH
+                && (c.apn.trim().to_ascii_lowercase(), c.protocol.clone()) == key
+        }) {
+            if !existing.active {
+                *existing = ctx;
+            }
+        } else {
+            result.push(ctx);
+        }
+    }
+    result
 }
 
 fn extract_object_path_array(value: &OwnedValue) -> Vec<String> {

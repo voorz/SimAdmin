@@ -152,7 +152,7 @@ function InfoField({ label, value, sensitive = false, showSensitive, extra }: {
 }
 
 function SmsCapacityProgress({ used, total }: { used?: number, total?: number }) {
-  if (used === undefined || total === undefined) return <Typography variant="body2" sx={{ fontSize: '0.825rem' }}>N/A</Typography>;
+  if (used === undefined || total === undefined || total === 0) return <Typography variant="body2" sx={{ fontSize: '0.825rem' }}>N/A</Typography>;
   const percentage = Math.min((used / total) * 100, 100);
   const isFull = used >= total;
   return (
@@ -221,7 +221,7 @@ function SimBasicInfo() {
         setSimInfo(simRes.data)
         const data = simRes.data
         const missingSlowFields =
-          data.present && (!data.phone_numbers?.length || !data.sms_center || data.sms_total === undefined)
+          data.present && (!data.phone_numbers?.length || !data.sms_center || data.sms_total === undefined || data.sms_total === 0)
         if (missingSlowFields && data.iccid && autoDetailsRefreshIccidRef.current !== data.iccid) {
           autoDetailsRefreshIccidRef.current = data.iccid
           setDetailsRefreshing(true)
