@@ -41,6 +41,85 @@ The project targets any Linux distribution with systemd, D-Bus, ModemManager, an
 
 The project consists of a Rust backend and a React frontend:
 
+## Architecture
+
+```mermaid
+graph TB
+    subgraph Browser["Browser"]
+        Frontend["React SPA<br/>(Vite + MUI)"]
+    end
+
+    subgraph Backend["Backend Process (Rust Binary)"]
+        Axum["Axum HTTP Server<br/>:3000"]
+        Handlers["Handlers<br/>(API + SPA Fallback)"]
+        DB["SQLite<br/>(SMS, Auth, Logs)"]
+        SMSListener["SMS Listener<br/>(D-Bus Signal)"]
+        VoWiFi["VoWiFi Engine<br/>(IKEv2/IPsec/IMS)"]
+    end
+
+    subgraph SystemServices["System Services"]
+        DBus["System D-Bus"]
+        MM["ModemManager"]
+        NM["NetworkManager"]
+        Systemd["systemd"]
+    end
+
+    subgraph Hardware["Hardware"]
+        Modem["4G/LTE Modem<br/>(USB/PCIe)"]
+        SIM["SIM / eUICC"]
+        WLAN["WLAN Adapter"]
+    end
+
+    Frontend -- "REST API<br/>/api/*" --> Axum
+    Axum --> Handlers
+    Handlers --> DB
+    Handlers --> DBus
+    SMSListener --> DBus
+    VoWiFi --> DBus
+
+    DBus --> MM
+    DBus --> NM
+
+    MM --> Modem
+    Modem --> SIM
+    NM --> WLAN
+
+    Systemd -.->|"manages"| Axum
+
+    style Frontend fill:#61dafb,color:#000
+    style Axum fill:#dea584,color:#000
+    style DB fill:#f7df1e,color:#000
+    style VoWiFi fill:#2aae67,color:#fff
+    style MM fill:#d70a53,color:#fff
+    style NM fill:#d70a53,color:#fff
+    style Modem fill:#4a9eff,color:#fff
+    style SIM fill:#4a9eff,color:#fff
+```
+
+```mermaid
+sequenceDiagram
+    participant U as User (Browser)
+    participant F as Frontend (React SPA)
+    participant B as Backend (Rust)
+    participant D as D-Bus
+    participant M as ModemManager
+    participant H as Modem Hardware
+
+    U->>F: Open web UI (:3000)
+    F->>B: GET /api/dashboard
+    B->>D: D-Bus call
+    D->>M: org.freedesktop.ModemManager1
+    M->>H: AT / QMI commands
+    H-->>M: Signal, SIM, Network data
+    M-->>D: D-Bus response
+    D-->>B: Modem info
+    B-->>F: JSON response
+    F-->>U: Render dashboard
+
+    Note over B,H: SMS: ModemManager D-Bus signal → Backend listener → SQLite → Push to frontend
+    Note over B,H: VoWiFi: Backend establishes IKEv2/IPsec tunnel → IMS register → SMS over WiFi
+```
+
 ## Development
 
 ### Prerequisites
