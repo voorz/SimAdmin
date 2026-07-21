@@ -20,10 +20,10 @@ jobs:
         include:
           - runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
-            arch: aarch64
+            arch: arm64
           - runner: ubuntu-24.04
             target: x86_64-unknown-linux-musl
-            arch: x86_64
+            arch: amd64
     runs-on: ${{ matrix.runner }}
 
     steps:
@@ -162,7 +162,7 @@ jobs:
           EOF
 
           mkdir -p release
-          OTA_FILE="release/simadmin_v${VERSION}_${ARCH}.tar.gz"
+          OTA_FILE="release/simadmin_v${VERSION}_linux_${ARCH}.tar.gz"
           cd "$OTA_TMP"
           tar -czf "$GITHUB_WORKSPACE/$OTA_FILE" meta.json simadmin www
           cd "$GITHUB_WORKSPACE"
@@ -222,8 +222,8 @@ jobs:
         id: checksums
         run: |
           cd release
-          AARCH64_FILE=$(ls *aarch64*.tar.gz 2>/dev/null || echo "")
-          X86_64_FILE=$(ls *x86_64*.tar.gz 2>/dev/null || echo "")
+          AARCH64_FILE=$(ls *linux_arm64*.tar.gz 2>/dev/null || echo "")
+          X86_64_FILE=$(ls *linux_amd64*.tar.gz 2>/dev/null || echo "")
 
           if [ -n "$AARCH64_FILE" ]; then
             AARCH64_MD5=$(md5sum "$AARCH64_FILE" | cut -d' ' -f1)
@@ -264,8 +264,8 @@ jobs:
 
             | File | Arch | Target Platform | MD5 | SHA-256 |
             |------|------|----------------|-----|---------|
-            | `${{ steps.checksums.outputs.aarch64_file }}` | aarch64 | ARM64 devices (CPE, routers, edge gateways) | `${{ steps.checksums.outputs.aarch64_md5 }}` | `${{ steps.checksums.outputs.aarch64_sha256 }}` |
-            | `${{ steps.checksums.outputs.x86_64_file }}` | x86_64 | x86 servers, dev machines, WSL | `${{ steps.checksums.outputs.x86_64_md5 }}` | `${{ steps.checksums.outputs.x86_64_sha256 }}` |
+            | `${{ steps.checksums.outputs.aarch64_file }}` | arm64 | ARM64 devices (CPE, routers, edge gateways) | `${{ steps.checksums.outputs.aarch64_md5 }}` | `${{ steps.checksums.outputs.aarch64_sha256 }}` |
+            | `${{ steps.checksums.outputs.x86_64_file }}` | amd64 | x86 servers, dev machines, WSL | `${{ steps.checksums.outputs.x86_64_md5 }}` | `${{ steps.checksums.outputs.x86_64_sha256 }}` |
 
             ### System Requirements
 
@@ -284,10 +284,10 @@ jobs:
 
             ```bash
             # Download the matching package for your architecture
-            # aarch64 (ARM64 devices)
+            # arm64 (ARM64 devices)
             wget https://github.com/voorz/SimAdmin/releases/download/v${{ steps.version.outputs.version }}/${{ steps.checksums.outputs.aarch64_file }}
 
-            # x86_64 (servers, WSL)
+            # amd64 (servers, WSL)
             wget https://github.com/voorz/SimAdmin/releases/download/v${{ steps.version.outputs.version }}/${{ steps.checksums.outputs.x86_64_file }}
 
             # Upload to device and apply via web UI (/ota), or:
