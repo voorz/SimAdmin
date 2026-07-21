@@ -257,7 +257,7 @@ jobs:
             ### Version Info
 
             - **Version**: ${{ steps.version.outputs.version }}
-            - **Commit**: ${{ steps.checksums.outputs.commit }}
+            - **Commit**: ${{ steps.version.outputs.commit }}
             - **Build Time**: ${{ steps.checksums.outputs.build_time }}
 
             ### Artifacts
