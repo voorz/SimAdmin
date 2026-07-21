@@ -3,34 +3,14 @@
 
   <p>Web-based SIM/eSIM management system for Linux cellular CPEs, portable Wi-Fi hotspots, and software routers. Comprehensive control over SIM/eSIM cards, cellular networks, SMS, DDNS, device status, and OTA updates.</p>
 
-  <div>
-    <a href="https://github.com/voorz/SimAdmin">
-      <img
-        alt="Linux"
-        src="https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black&style=flat-square"
-      />
-    </a>
-    <a href="./LICENSE">
-      <img
-        src="https://img.shields.io/github/license/voorz/SimAdmin?style=flat-square"
-      />
-    </a>
-    <a href="https://github.com/voorz/SimAdmin/releases">
-      <img
-        src="https://img.shields.io/github/v/release/voorz/SimAdmin?style=flat-square"
-      />
-    </a>
-    <a href="https://github.com/voorz/SimAdmin/releases">
-      <img
-        src="https://img.shields.io/github/downloads/voorz/SimAdmin/total?style=flat-square"
-      />
-    </a>
-    <a href="https://github.com/voorz/SimAdmin/actions">
-      <img
-        src="https://img.shields.io/github/actions/workflow/status/voorz/SimAdmin/build-ota-package.yml?style=flat-square&label=CI"
-      />
-    </a>
-  </div>
+  <p>
+    <a href="https://github.com/voorz/SimAdmin"><img src="https://img.shields.io/badge/Linux-Debian%20%7C%20Ubuntu-FCC624?logo=linux&logoColor=black" alt="Linux" /></a>
+    <a href="./LICENSE"><img src="https://img.shields.io/github/license/voorz/SimAdmin?label=license" alt="License" /></a>
+    <img src="https://img.shields.io/badge/Arch-aarch64%20%7C%20x86__64-informational" alt="Architectures" />
+    <a href="https://github.com/voorz/SimAdmin/releases"><img src="https://img.shields.io/github/v/release/voorz/SimAdmin?label=release" alt="Release" /></a>
+    <a href="https://github.com/voorz/SimAdmin/releases"><img src="https://img.shields.io/github/downloads/voorz/SimAdmin/total?label=downloads" alt="Downloads" /></a>
+    <a href="https://github.com/voorz/SimAdmin/actions"><img src="https://img.shields.io/github/actions/workflow/status/voorz/SimAdmin/build-ota-package.yml?label=CI" alt="CI" /></a>
+  </p>
 
 </div>
 

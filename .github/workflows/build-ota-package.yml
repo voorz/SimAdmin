@@ -85,16 +85,15 @@ jobs:
       - name: Build backend
         working-directory: backend
         run: |
-          export CC_${TARGET//-/_}_LINKER=musl-gcc
-          export CC_${TARGET//-/_}=musl-gcc
+          TARGET_UPPER=$(echo ${{ matrix.target }} | tr '[:lower:]-' '[:upper:]_')
+          export CC_${TARGET_UPPER}=musl-gcc
+          export CARGO_TARGET_${TARGET_UPPER}_LINKER=musl-gcc
           export SQLITE3_STATIC=1
           export LIBSQLITE3_SYS_USE_PKG_CONFIG=0
           cargo build --release --target ${{ matrix.target }}
           BINARY_PATH="target/${{ matrix.target }}/release/simadmin"
           ls -lh "$BINARY_PATH"
           file "$BINARY_PATH"
-        env:
-          TARGET: ${{ matrix.target }}
 
       - name: Compress binary with UPX
         run: |
