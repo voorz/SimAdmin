@@ -33,13 +33,51 @@
 
 </div>
 
-# SimAdmin
+# SimAdmin - SIM/eSIM Hub
 
 SimAdmin is a web-based management system for Linux-based cellular CPEs, portable Wi-Fi hotspots, and software routers. It provides comprehensive control over SIM/eSIM cards, cellular networks, SMS, DDNS, device status, and OTA updates.
 
-The project targets any Linux distribution with systemd, D-Bus, ModemManager, and NetworkManager (e.g. Debian, Ubuntu, OpenWrt, etc.).
+**Key Highlight — VoWiFi (WiFi Calling) Support**: Native IKEv2/IPsec implementation with zero external dependencies. Uses SIM hardware authentication to establish encrypted tunnels, enabling IMS registration and secure SMS even without cellular signal or in airplane mode.
 
 The project consists of a Rust backend and a React frontend:
+
+- **Backend**: Rust + Axum + zbus, communicates with ModemManager via D-Bus, with fallbacks to `mmcli` and `qmicli` or direct AT commands.
+- **Frontend**: React + Vite + Material UI, providing dashboard, SIM management, cellular network, device network, SMS, notification center, automation, and OTA update pages.
+- **Deployment**: The backend binary serves the frontend SPA in-process. Installed to `/opt/simadmin`, managed by systemd.
+
+Health checks are designed for Linux cellular devices with ModemManager support. Different modem firmware, kernels, and ModemManager versions expose different capabilities — actual features depend on your hardware.
+
+### System Requirements
+
+**Supported OS**: Debian 11+, Ubuntu 20.04+, or any Linux distribution with:
+
+- **systemd** — service management
+- **D-Bus** — IPC bus for ModemManager and NetworkManager
+- **ModemManager** + `mmcli` — modem abstraction layer
+- **NetworkManager** + `nmcli` — network management
+
+> SimAdmin communicates with modems through ModemManager's D-Bus API, not via direct AT commands.
+> This is why Debian/Ubuntu (which ship these services by default) are the primary targets.
+> Distributions without these services (e.g. OpenWrt, Alpine) require significant adaptation.
+
+**Why not Docker?**
+
+SimAdmin requires real-time access to system D-Bus, modem hardware (`/dev/ttyUSB*`), and NetworkManager. Containerizing introduces unnecessary complexity:
+
+- D-Bus socket passthrough (`/var/run/dbus` mount)
+- Device file passthrough (`/dev` mount)
+- Potential conflicts between container and host NetworkManager
+- Loss of systemd service management benefits
+
+For production, direct deployment on Debian/Ubuntu is the recommended approach.
+
+## Documentation
+
+- 🚀 **[Installation & Deployment](./docs/install.md)** — One-click install/uninstall, default access address, and initial admin password setup.
+- 📜 **[Changelog](./docs/changelog.md)** — Detailed version history and update notes.
+- ⚙️ **[Environment & System Management](./docs/environment.md)** — Hardware requirements, dependencies, install paths, eSIM management, systemd service, and data persistence.
+- 🛠️ **[Developer Guide](./docs/developer.md)** — Project structure, frontend/backend development, OTA build, ADB deployment, and D-Bus interface reference.
+- 🔌 **[REST API Documentation](./bruno-api/README.md)** — REST API route map, request/response schemas, and Bruno API debugging collections.
 
 ## Architecture
 
@@ -177,14 +215,6 @@ curl -X POST http://<device-ip>:3000/api/ota/apply
 - **Install path**: `/opt/simadmin/` (binary + `www/` + `data.db`)
 - **Service**: `systemd` (`simadmin.service`)
 - **Access**: `http://<device-ip>:3000`
-
-## Documentation
-
-- [Installation & Deployment](./docs/install.md) — One-click install/uninstall, default access address, and initial admin password setup.
-- [Changelog](./docs/changelog.md) — Detailed version history and update notes.
-- [Environment & System Management](./docs/environment.md) — Hardware requirements, dependencies, install paths, eSIM management, systemd service, and data persistence.
-- [Developer Guide](./docs/developer.md) — Project structure, frontend/backend development, OTA build, ADB deployment, and D-Bus interface reference.
-- [REST API Documentation](./bruno-api/README.md) — REST API route map, request/response schemas, and Bruno API debugging collections.
 
 ## Disclaimer
 
