@@ -81,9 +81,9 @@ cargo run -- --host :: --port 3000
 
 - 同步 `VERSION` 到 `backend/Cargo.toml` 和 `frontend/package.json`。
 - 使用 `pnpm-lock.yaml` 时通过 `pnpm install --frozen-lockfile`、`pnpm run lint` 和 `pnpm exec vite build` 构建前端到 `frontend/dist/`。
-- 交叉编译后端到 `backend/target/aarch64-unknown-linux-musl/release/simadmin`。
+- 交叉编译后端到 `backend/target/aarch64-unknown-linux-musl/release/simadmin` 或 `backend/target/x86_64-unknown-linux-musl/release/simadmin`。
 - 可选使用 UPX 压缩后端二进制；未安装 UPX 时会自动跳过压缩。
-- 生成 `release/simadmin_<version>.tar.gz` OTA 包。
+- 生成 `release/simadmin_<version>_linux_<arch>.tar.gz` OTA 包（arm64 / amd64）。
 
 ### 通过 ADB 部署
 
