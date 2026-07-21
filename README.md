@@ -41,24 +41,63 @@ The project targets any Linux distribution with systemd, D-Bus, ModemManager, an
 
 The project consists of a Rust backend and a React frontend:
 
-### Development
+## Development
 
-| Component | Tech Stack | Dev Server |
-|-----------|-----------|------------|
-| Backend | Rust + Axum + zbus | `cargo run -- --host :: --port 3000` |
-| Frontend | React + Vite + MUI | `pnpm dev` (port 5173, proxies `/api` to `:3000`) |
+### Prerequisites
 
-- Backend communicates with ModemManager via system D-Bus. On dev machines without modem hardware, API calls will return errors — this is expected.
-- Frontend dev server proxies `/api/*` requests to the backend. Update `target` in `vite.config.ts` if the backend runs on a different host.
-- Build the full OTA package via GitHub Actions: push a `v*` tag to trigger the build workflow, which cross-compiles to `aarch64-unknown-linux-musl` and publishes a Release.
-- Local OTA builds require `./scripts/build.sh` (run in WSL2 or Linux with cross-compilation toolchain installed).
+- [Rust](https://rustup.rs/) (stable toolchain)
+- [Node.js](https://nodejs.org/) 20+ and [pnpm](https://pnpm.io/) 9
+- System D-Bus, ModemManager, NetworkManager (for hardware interaction)
 
-### Deployment
+### Run Dev Servers
 
-- The backend binary serves the frontend SPA in-process. Installed to `/opt/simadmin`, managed by systemd.
-- One-click install: `curl -fsSL https://raw.githubusercontent.com/voorz/SimAdmin/main/install_latest.sh | sh`
-- OTA updates can be applied via the web UI (`/ota`) or by uploading `simadmin.tar.gz` from GitHub Releases.
-- Target architecture: `aarch64-unknown-linux-musl` (static binary, no glibc dependency).
+```bash
+# Terminal 1 — backend (port 3000)
+cd backend
+cargo run -- --host :: --port 3000
+
+# Terminal 2 — frontend (port 5173, proxies /api to :3000)
+cd frontend
+pnpm install
+pnpm dev
+```
+
+> On dev machines without modem hardware, `/api/*` hardware calls will return errors — this is expected.
+
+### Build OTA Package
+
+```bash
+# Push a v* tag to trigger GitHub Actions CI build
+git tag v1.1.6-1
+git push origin v1.1.6-1
+
+# Or build locally (requires Linux/WSL2 with cross-compilation toolchain)
+./scripts/build.sh
+```
+
+CI cross-compiles to `aarch64-unknown-linux-musl` (static binary), optionally UPX-compresses, and publishes a GitHub Release with `simadmin.tar.gz`.
+
+## Deployment
+
+### One-Click Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/voorz/SimAdmin/main/install_latest.sh | sh
+```
+
+### OTA Update
+
+Upload `simadmin.tar.gz` from [Releases](https://github.com/voorz/SimAdmin/releases) via the web UI (`/ota`), or:
+
+```bash
+curl -X POST http://<device-ip>:3000/api/ota/upload -F "file=@simadmin.tar.gz"
+curl -X POST http://<device-ip>:3000/api/ota/apply
+```
+
+- **Target arch**: `aarch64-unknown-linux-musl` (static binary, no glibc dependency)
+- **Install path**: `/opt/simadmin/` (binary + `www/` + `data.db`)
+- **Service**: `systemd` (`simadmin.service`)
+- **Access**: `http://<device-ip>:3000`
 
 ## Documentation
 
