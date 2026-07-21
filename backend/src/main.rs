@@ -46,6 +46,7 @@ mod system_event;
 mod system_event_monitor;
 mod utils;
 mod verification_code;
+mod vowifi;
 
 use config::{get_default_config_path, ConfigManager};
 use db::Database;
@@ -326,6 +327,7 @@ async fn main() -> Result<()> {
     let data_user_disabled = Arc::new(AtomicBool::new(!config_manager.get_data_enabled()));
     let airplane_mode_requested = Arc::new(AtomicBool::new(false));
     let cell_monitoring_active = Arc::new(AtomicBool::new(false));
+    let vowifi_runtime = Arc::new(vowifi::runtime::VowifiRuntime::new());
     let esim_supervisor = Arc::new(EsimSupervisor::new(Arc::clone(&config_manager)));
 
     let nm_result = ensure_nm_modem_profile().await;
@@ -406,12 +408,14 @@ async fn main() -> Result<()> {
         let conn_clone = Connection::system().await?;
         let db_clone = Arc::clone(&app_db);
         let notification_clone = Arc::clone(&notification_sender);
+        let sms_config_clone = Arc::clone(&config_manager);
         let resync_rx = sms_resync_rx;
         tokio::spawn(async move {
             let _ = sms_listener::start_sms_listener(
                 conn_clone,
                 db_clone,
                 notification_clone,
+                sms_config_clone,
                 resync_rx,
             )
             .await;
@@ -494,6 +498,7 @@ async fn main() -> Result<()> {
         sms_resync,
         data_user_disabled,
         airplane_mode_requested,
+        vowifi_runtime,
         cell_monitoring_active,
     );
 
@@ -501,6 +506,8 @@ async fn main() -> Result<()> {
     automation::spawn_automation_scheduler(app_state.clone());
 
     // Build protected routes - 使用统一的 AppState
+    spawn_vowifi_auto_restore(app_state.clone());
+
     let protected_routes = Router::new()
         // ========== 设备信息接口 ==========
         .route("/api/device", get(get_device_info).options(options_handler))
@@ -766,6 +773,58 @@ async fn main() -> Result<()> {
         .route(
             "/api/ims/status",
             get(get_ims_status_handler).options(options_handler),
+        )
+        .route(
+            "/api/vowifi/status",
+            get(get_vowifi_status_handler).options(options_handler),
+        )
+        .route(
+            "/api/vowifi/control",
+            get(get_vowifi_control_handler).options(options_handler),
+        )
+        .route(
+            "/api/vowifi/feature",
+            post(set_vowifi_feature_handler).options(options_handler),
+        )
+        .route(
+            "/api/vowifi/connection",
+            post(set_vowifi_connection_handler).options(options_handler),
+        )
+        .route(
+            "/api/vowifi/connect",
+            post(connect_vowifi_handler).options(options_handler),
+        )
+        .route(
+            "/api/vowifi/profile",
+            get(get_vowifi_profile_handler).options(options_handler),
+        )
+        .route(
+            "/api/vowifi/diagnostics",
+            get(get_vowifi_diagnostics_handler).options(options_handler),
+        )
+        .route(
+            "/api/vowifi/profiles",
+            get(get_vowifi_profiles_handler).options(options_handler),
+        )
+        .route(
+            "/api/vowifi/events",
+            get(get_vowifi_events_handler).options(options_handler),
+        )
+        .route(
+            "/api/vowifi/soak",
+            get(get_vowifi_soak_runs_handler).options(options_handler),
+        )
+        .route(
+            "/api/vowifi/sms/delivery",
+            get(get_vowifi_sms_deliveries_handler).options(options_handler),
+        )
+        .route(
+            "/api/vowifi/sms/delivery/{message_id}",
+            get(get_vowifi_sms_delivery_handler).options(options_handler),
+        )
+        .route(
+            "/api/vowifi/esim-restore/status",
+            get(get_vowifi_esim_restore_handler).options(options_handler),
         )
         .route(
             "/api/voicemail/status",
@@ -1039,4 +1098,11 @@ async fn shutdown_signal() {
         _ = ctrl_c => {},
         _ = terminate => {},
     }
+
+    warn!("Shutdown signal received; starting graceful shutdown");
+    std::thread::spawn(|| {
+        std::thread::sleep(std::time::Duration::from_secs(8));
+        eprintln!("SimAdmin graceful shutdown exceeded 8s; forcing process exit");
+        std::process::exit(0);
+    });
 }

@@ -1,7 +1,6 @@
 //! API 处理器模块 (ModemManager 版)
 //!
 //! 包含所有 HTTP API 的处理函数
-
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -15,17 +14,22 @@ use std::fs;
 use std::process::{Command, Output};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, OnceLock};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 use zbus::Connection;
 
 use crate::{
-    config::ApnConfig,
+    modem_manager,
+    config::{ApnConfig, VowifiConfig},
+    db::{
+        NewVowifiSmsDelivery, NewVowifiSmsPart, SmsMessage, VowifiEsimRestoreEntry,
+        VowifiRuntimeEventsResponse, VowifiSmsDeliveriesResponse, VowifiSoakRunsResponse,
+    },
     esim::EsimApiError,
     models::*,
     modem_manager::{
-        self, answer_call, apply_roaming_policy, current_sim_identity,
+        answer_call, apply_roaming_policy, current_sim_identity,
         find_nm_modem_connection_pub, get_airplane_mode, get_band_lock_status,
         get_baseband_restart_progress, get_call_by_path, get_call_settings, get_cell_location,
         get_cells_data, get_data_connection_status, get_device_info_data, get_is_roaming_mm,
@@ -47,10 +51,31 @@ use crate::{
         read_cpu_load_sync, read_disk_info, read_interface_stats, read_memory_info,
         read_network_interfaces, read_system_info, read_uptime, sample_cpu_usage,
     },
+    vowifi::diagnostics::{
+        self as vowifi_diagnostics, VowifiDiagnosticsResponse, VowifiProfileMatchResponse,
+        VowifiProfilesResponse, VowifiStatusResponse,
+    },
+    vowifi::restore::RestorePhase,
+    vowifi::{
+        live::{clear_all_live_runtime, send_live_sms_over_ims, verify_live_sim_auth_access},
+        sms::{MoSmsSipOutcome, MtSmsDeliver},
+    },
 };
 
 const ESIM_SIM_IDENTITY_TIMEOUT_SECS: u64 = 3;
 const ESIM_CACHED_SIM_IDENTITY_TIMEOUT_MS: u64 = 800;
+const VOWIFI_SIM_IDENTITY_TIMEOUT_SECS: u64 = 3;
+const VOWIFI_STATUS_STAGE_TIMEOUT_SECS: u64 = 12;
+const VOWIFI_LIVE_STAGE_TIMEOUT_SECS: u64 = 90;
+const VOWIFI_MANUAL_CONNECT_ATTEMPTS: u8 = 3;
+const VOWIFI_MANUAL_CONNECT_RETRY_DELAY_SECS: u64 = 1;
+const VOWIFI_PROFILE_SWITCH_RESTORE_INITIAL_DELAY_SECS: u64 = 1;
+const VOWIFI_PROFILE_SWITCH_RESTORE_ATTEMPTS: u8 = 3;
+const VOWIFI_PROFILE_SWITCH_RESTORE_RETRY_DELAY_SECS: u64 = 3;
+const VOWIFI_RESTORE_IDENTITY_GATE_ATTEMPTS: u8 = 5;
+const VOWIFI_RESTORE_IDENTITY_GATE_DELAY_SECS: u64 = 2;
+const VOWIFI_PROFILE_SWITCH_CONNECT_ATTEMPTS: u8 = 2;
+const VOWIFI_PROFILE_SWITCH_CONNECT_RETRY_DELAY_SECS: u64 = 1;
 const SMS_DB_MAINTENANCE_DELETE_THRESHOLD: usize = 100;
 const SMS_DB_MAINTENANCE_DELAY_SECS: u64 = 60;
 
@@ -810,13 +835,30 @@ pub async fn enable_esim_profile_handler(
     Path(iccid): Path<String>,
 ) -> impl IntoResponse {
     let event_entity = mask_identifier(&iccid);
+    let vowifi_before_switch = app.config_manager.get_vowifi_config();
+    let switch_token = new_vowifi_switch_token("profile-switch");
+    if vowifi_before_switch.feature_enabled {
+        persist_vowifi_restore_phase(
+            &app,
+            &switch_token,
+            RestorePhase::Snapshot.as_str(),
+            Instant::now(),
+            false,
+            false,
+            None,
+            0,
+        );
+        let _ = reset_vowifi_runtime(&app, "vowifi_profile_switch_pre_teardown").await;
+    }
 
+    // Reset baseband restart steps progress
     modem_manager::reset_baseband_restart_progress();
     modem_manager::record_restart_step("启用 eSIM Profile", "running", None);
 
     let bg_app = app.clone();
     let bg_iccid = iccid.clone();
     let bg_event_entity = event_entity.clone();
+    let bg_switch_token = switch_token.clone();
 
     tokio::spawn(async move {
         let _guard = modem_manager::BasebandRestartRunGuard;
@@ -842,6 +884,10 @@ pub async fn enable_esim_profile_handler(
                             } else {
                                 warn!("Failed to request SMS resync after eSIM profile switch");
                             }
+                            spawn_vowifi_profile_switch_restore(
+                                bg_app.clone(),
+                                bg_switch_token,
+                            );
                             bg_app
                                 .system_event_emitter
                                 .emit_code(
@@ -868,7 +914,9 @@ pub async fn enable_esim_profile_handler(
                                 .sms_resync
                                 .request_scan("profile-switch-recovery-failed")
                             {
-                                info!("Requested SMS resync after failed eSIM profile recovery");
+                                info!(
+                                    "Requested SMS resync after failed eSIM profile recovery"
+                                );
                             } else {
                                 warn!(
                                     "Failed to request SMS resync after failed eSIM profile recovery"
@@ -877,13 +925,8 @@ pub async fn enable_esim_profile_handler(
                         }
                     }
                 } else {
-                    modem_manager::record_restart_step(
-                        "启用 eSIM Profile",
-                        "error",
-                        Some(data.msg.clone()),
-                    );
-                    bg_app
-                        .system_event_emitter
+                    modem_manager::record_restart_step("启用 eSIM Profile", "error", Some(data.msg.clone()));
+                    bg_app.system_event_emitter
                         .emit_code(
                             system_event_codes::ESIM_PROFILE_ENABLE_FAILED,
                             system_event_severity::WARNING,
@@ -930,13 +973,8 @@ pub async fn enable_esim_profile_handler(
             }
             Err(err) => {
                 let message = err.message();
-                modem_manager::record_restart_step(
-                    "启用 eSIM Profile",
-                    "error",
-                    Some(message.clone()),
-                );
-                bg_app
-                    .system_event_emitter
+                modem_manager::record_restart_step("启用 eSIM Profile", "error", Some(message.clone()));
+                bg_app.system_event_emitter
                     .emit_code(
                         system_event_codes::ESIM_PROFILE_ENABLE_FAILED,
                         system_event_severity::WARNING,
@@ -949,22 +987,23 @@ pub async fn enable_esim_profile_handler(
         }
     });
 
-    let response = EsimCommandResponse {
+    let success_resp = EsimCommandResponse {
         code: 0,
         status: "success".to_string(),
         action: "enable".to_string(),
         msg: "Profile enable task started in background".to_string(),
         data: None,
     };
-
     (
         StatusCode::OK,
         Json(ApiResponse::success_with_message(
             "Profile enable requested",
-            response,
+            success_resp,
         )),
     )
 }
+
+
 
 /// POST /api/esim/profiles/{iccid}/rename
 pub async fn rename_esim_profile_handler(
@@ -2610,16 +2649,389 @@ fn schedule_sms_db_maintenance(app: &AppState, deleted: usize) {
     });
 }
 
+fn persist_vowifi_mt_deliveries(db: &Database, outcome: &MoSmsSipOutcome) -> Vec<SmsMessage> {
+    if outcome.mt_deliveries.is_empty() {
+        return Vec::new();
+    }
+
+    let mut groups: std::collections::BTreeMap<String, Vec<&MtSmsDeliver>> =
+        std::collections::BTreeMap::new();
+    for deliver in &outcome.mt_deliveries {
+        groups
+            .entry(vowifi_mt_delivery_group_key(deliver))
+            .or_default()
+            .push(deliver);
+    }
+
+    let mut inserted_messages = Vec::new();
+    for (group_key, mut parts) in groups {
+        parts.sort_by_key(|part| part.segment_sequence);
+        let originator = parts
+            .first()
+            .map(|part| part.originator.as_str())
+            .unwrap_or_default();
+        let reference = parts
+            .first()
+            .and_then(|part| part.segment_reference)
+            .or_else(|| {
+                parts
+                    .first()
+                    .map(|part| u16::from(part.rp_message_reference))
+            })
+            .unwrap_or_default();
+        let total = parts
+            .iter()
+            .map(|part| part.segment_total)
+            .max()
+            .unwrap_or(1)
+            .max(1);
+        let complete = (1..=total).all(|sequence| {
+            parts
+                .iter()
+                .any(|part| part.segment_sequence == sequence && !part.text.is_empty())
+        });
+        let mut api_sms_id = None;
+        let mut storage_key = group_key.clone();
+
+        if complete {
+            let mut text = String::new();
+            for sequence in 1..=total {
+                if let Some(part) = parts.iter().find(|part| part.segment_sequence == sequence) {
+                    text.push_str(&part.text);
+                }
+            }
+            storage_key = vowifi_mt_storage_key(outcome, originator, &text);
+            let storage_marker = format!("vowifi-mt:{storage_key}");
+            api_sms_id = db.sms_id_by_pdu(&storage_marker).unwrap_or(None);
+            if api_sms_id.is_none() {
+                let timestamp = crate::db::beijing_sms_now_string();
+                api_sms_id = db
+                    .insert_sms_at_with_transport(
+                        "incoming",
+                        originator,
+                        &text,
+                        &timestamp,
+                        "received",
+                        Some(&storage_marker),
+                        "vowifi_ims",
+                    )
+                    .ok();
+                if let Some(id) = api_sms_id {
+                    inserted_messages.push(SmsMessage {
+                        id,
+                        direction: "incoming".to_string(),
+                        phone_number: originator.to_string(),
+                        content: text.clone(),
+                        timestamp,
+                        status: "received".to_string(),
+                        pdu: Some(storage_marker.clone()),
+                        transport: "vowifi_ims".to_string(),
+                    });
+                }
+            }
+        }
+        let short_key = &storage_key[..std::cmp::min(16, storage_key.len())];
+        let mt_message_id = format!("vowifi-mt-{short_key}");
+        let mt_trace_id = format!("{}-mt-{short_key}", outcome.trace_id);
+
+        let _ = db.upsert_vowifi_sms_delivery(NewVowifiSmsDelivery {
+            message_id: &mt_message_id,
+            trace_id: &mt_trace_id,
+            direction: "mobile_terminated",
+            state: if complete { "received" } else { "submitted" },
+            sip_state: "accepted",
+            rpdu_ack: "acked",
+            delivery_reported: complete,
+            failure_cause: None,
+            retry_count: 0,
+            api_sms_id,
+        });
+
+        for part in parts {
+            let _ = db.upsert_vowifi_sms_part(NewVowifiSmsPart {
+                message_id: &mt_message_id,
+                reference: i64::from(reference),
+                sequence: i64::from(part.segment_sequence),
+                total: i64::from(total),
+                received: true,
+            });
+        }
+    }
+
+    inserted_messages
+}
+
+fn spawn_vowifi_sms_followup_persist(
+    app: AppState,
+    mut followup: tokio::sync::mpsc::UnboundedReceiver<crate::vowifi::live::LiveSmsFollowupFrame>,
+) {
+    tokio::spawn(async move {
+        while let Some(frame) = followup.recv().await {
+            let mt_messages = persist_vowifi_mt_deliveries(&app.database, &frame.outcome);
+            let mt_complete_count = vowifi_mt_complete_group_count(&frame.outcome);
+            if !frame.outcome.mt_deliveries.is_empty() || mt_complete_count > 0 {
+                info!(
+                    trace_id = frame.outcome.trace_id.as_str(),
+                    message_id = frame.outcome.message_id.as_str(),
+                    mt_received_count = frame.outcome.mt_deliveries.len(),
+                    mt_complete_count,
+                    mt_inserted_count = mt_messages.len(),
+                    "VoWiFi SMS follow-up deliveries persisted"
+                );
+            }
+            for sms in mt_messages {
+                let notification_sender = Arc::clone(&app.notification_sender);
+                tokio::spawn(async move {
+                    let _ = notification_sender.forward_sms(&sms).await;
+                });
+            }
+        }
+    });
+}
+fn vowifi_mt_complete_group_count(outcome: &MoSmsSipOutcome) -> usize {
+    let mut groups: std::collections::BTreeMap<String, Vec<&MtSmsDeliver>> =
+        std::collections::BTreeMap::new();
+    for deliver in &outcome.mt_deliveries {
+        groups
+            .entry(vowifi_mt_delivery_group_key(deliver))
+            .or_default()
+            .push(deliver);
+    }
+
+    groups
+        .values()
+        .filter(|parts| {
+            let total = parts
+                .iter()
+                .map(|part| part.segment_total)
+                .max()
+                .unwrap_or(1)
+                .max(1);
+            (1..=total).all(|sequence| {
+                parts
+                    .iter()
+                    .any(|part| part.segment_sequence == sequence && !part.text.is_empty())
+            })
+        })
+        .count()
+}
+
+fn vowifi_mt_delivery_group_key(deliver: &MtSmsDeliver) -> String {
+    let logical_part = if let Some(reference) = deliver.segment_reference {
+        format!("segment:{reference:04x}:{}", deliver.segment_total)
+    } else {
+        let text_hash = format!("{:x}", md5::compute(deliver.text.as_bytes()));
+        format!("single:{}:{text_hash}", deliver.service_center_timestamp)
+    };
+    let material = format!("{}|{}", deliver.originator, logical_part);
+    format!("{:x}", md5::compute(material.as_bytes()))
+}
+
+fn vowifi_mt_storage_key(outcome: &MoSmsSipOutcome, originator: &str, text: &str) -> String {
+    let text_hash = format!("{:x}", md5::compute(text.as_bytes()));
+    let material = format!("{}|{originator}|{text_hash}", outcome.message_id);
+    format!("{:x}", md5::compute(material.as_bytes()))
+}
+
+fn new_vowifi_switch_token(reason: &str) -> String {
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or_default();
+    format!("{reason}-{millis:x}")
+}
+
+fn persist_vowifi_restore_phase(
+    app: &AppState,
+    switch_token: &str,
+    switch_phase: &'static str,
+    phase_started_at: Instant,
+    identity_ready: bool,
+    sim_auth_ready: bool,
+    degraded_reason: Option<&str>,
+    retry_count: u8,
+) {
+    if let Err(err) = app
+        .database
+        .upsert_vowifi_esim_restore(crate::db::NewVowifiEsimRestore {
+            switch_token: Some(switch_token),
+            switch_phase: Some(switch_phase),
+            phase_ms: Some(phase_started_at.elapsed().as_millis().min(i64::MAX as u128) as i64),
+            identity_ready,
+            sim_auth_ready,
+            degraded_reason,
+            retry_count: i64::from(retry_count),
+        })
+    {
+        warn!(error = %err, "Failed to persist VoWiFi eSIM restore phase");
+    }
+}
+
 /// POST /api/sms/send
 pub async fn send_sms_handler(
-    State(conn): State<Arc<Connection>>,
-    State(db): State<Arc<Database>>,
+    State(app): State<AppState>,
     Json(payload): Json<SendSmsRequest>,
 ) -> impl IntoResponse {
-    match send_sms(&conn, &payload.phone_number, &payload.content).await {
+    let vowifi_control = app.config_manager.get_vowifi_config();
+    let vowifi_allowed = vowifi_control.feature_enabled && vowifi_control.connection_enabled;
+    let mut vowifi_ready =
+        vowifi_allowed && app.vowifi_runtime.snapshot().await.readiness().sms_ready;
+    let mut airplane_mode = None;
+    if vowifi_allowed && !vowifi_ready {
+        let airplane_enabled = get_airplane_mode(&app.dbus_conn)
+            .await
+            .map(|state| state.enabled)
+            .unwrap_or(false);
+        airplane_mode = Some(airplane_enabled);
+        if airplane_enabled {
+            app.vowifi_runtime
+                .refresh_identity_with_timeout(
+                    &app.dbus_conn,
+                    std::time::Duration::from_secs(VOWIFI_SIM_IDENTITY_TIMEOUT_SECS),
+                )
+                .await;
+            // let _ = app.database.clear_vowifi_runtime_events();
+            let current_snap = app.vowifi_runtime.snapshot().await;
+            let profile_meta = current_snap.profile.profile.as_ref();
+            let profile_id = profile_meta.map(|p| p.profile_id.as_ref());
+            let _ = app.database.insert_vowifi_runtime_event(crate::db::NewVowifiRuntimeEvent {
+                trace_id: Some("runtime-connect"),
+                level: "info",
+                phase: "connect_start",
+                profile_id,
+                event_type: "connect_start",
+                detail_json: "{}",
+            });
+            let snapshot = app
+                .vowifi_runtime
+                .connect_live_with_stage_timeout(
+                    Some(&app.database),
+                    std::time::Duration::from_secs(VOWIFI_LIVE_STAGE_TIMEOUT_SECS),
+                )
+                .await;
+            vowifi_ready = snapshot.readiness().sms_ready;
+            if !vowifi_ready {
+                return (
+                    StatusCode::OK,
+                    Json(ApiResponse::<serde_json::Value>::error(format!(
+                        "Failed to send SMS over VoWiFi: {}",
+                        snapshot
+                            .degraded_reason
+                            .as_deref()
+                            .unwrap_or("sms_ready_not_reached")
+                    ))),
+                );
+            }
+        } else {
+            let status = connect_vowifi_with_attempts(
+                &app,
+                VOWIFI_MANUAL_CONNECT_ATTEMPTS,
+                std::time::Duration::from_secs(VOWIFI_MANUAL_CONNECT_RETRY_DELAY_SECS),
+                false,
+            )
+            .await;
+            vowifi_ready = status.readiness.sms_ready;
+            if !vowifi_ready {
+                return (
+                    StatusCode::OK,
+                    Json(ApiResponse::<serde_json::Value>::error(format!(
+                        "Failed to send SMS over VoWiFi: {}",
+                        status
+                            .degraded_reason
+                            .as_deref()
+                            .unwrap_or("sms_ready_not_reached")
+                    ))),
+                );
+            }
+        }
+    }
+    if vowifi_ready {
+        match send_live_sms_over_ims(&payload.phone_number, &payload.content).await {
+            Ok(send_result) => {
+                let outcome = send_result.outcome;
+                let api_sms_id = app
+                    .database
+                    .insert_sms_with_transport(
+                        "outgoing",
+                        &payload.phone_number,
+                        &payload.content,
+                        outcome.api_status(),
+                        None,
+                        "vowifi_ims",
+                    )
+                    .ok();
+                let _ = app
+                    .database
+                    .upsert_vowifi_sms_delivery(NewVowifiSmsDelivery {
+                        message_id: &outcome.message_id,
+                        trace_id: &outcome.trace_id,
+                        direction: "mobile_originated",
+                        state: outcome.delivery_state.as_str(),
+                        sip_state: if (200..300).contains(&outcome.sip_status) {
+                            "accepted"
+                        } else {
+                            "rejected"
+                        },
+                        rpdu_ack: outcome.rpdu_ack.as_str(),
+                        delivery_reported: false,
+                        failure_cause: outcome.failure_cause.as_deref(),
+                        retry_count: 0,
+                        api_sms_id,
+                    });
+                spawn_vowifi_sms_followup_persist(app.clone(), send_result.followup);
+                return (
+                    StatusCode::OK,
+                    Json(ApiResponse::success_with_message(
+                        "SMS sent",
+                        json!({
+                            "path": "vowifi_ims",
+                            "transport": "vowifi_ims",
+                            "message_id": outcome.message_id,
+                            "trace_id": outcome.trace_id,
+                            "delivery_state": outcome.delivery_state.as_str(),
+                            "rpdu_ack": outcome.rpdu_ack.as_str(),
+                            "mt_followup": "background",
+                        }),
+                    )),
+                );
+            }
+            Err(err) if vowifi_allowed => {
+                return (
+                    StatusCode::OK,
+                    Json(ApiResponse::<serde_json::Value>::error(format!(
+                        "Failed to send SMS over VoWiFi: {}",
+                        err.reason
+                    ))),
+                );
+            }
+            Err(err) => {
+                let airplane_mode = match airplane_mode {
+                    Some(enabled) => enabled,
+                    None => get_airplane_mode(&app.dbus_conn)
+                        .await
+                        .map(|state| state.enabled)
+                        .unwrap_or(false),
+                };
+                if airplane_mode {
+                    return (
+                        StatusCode::OK,
+                        Json(ApiResponse::<serde_json::Value>::error(format!(
+                            "Failed to send SMS over VoWiFi: {}",
+                            err.reason
+                        ))),
+                    );
+                }
+                warn!(
+                    reason = err.reason.as_str(),
+                    "VoWiFi SMS send failed; falling back to modem SMS path"
+                );
+            }
+        }
+    }
+
+    match send_sms(&app.dbus_conn, &payload.phone_number, &payload.content).await {
         Ok(path) => {
-            // 存入数据库
-            let _ = db.insert_sms(
+            let _ = app.database.insert_sms(
                 "outgoing",
                 &payload.phone_number,
                 &payload.content,
@@ -3190,6 +3602,1054 @@ pub async fn get_ims_status_handler() -> impl IntoResponse {
             "IMS status is not exposed by ModemManager on this backend",
         )),
     )
+}
+
+async fn current_vowifi_profile_match(app: &AppState) -> VowifiProfileMatchResponse {
+    if !app.config_manager.get_vowifi_config().feature_enabled {
+        return VowifiProfileMatchResponse::default();
+    }
+    let snapshot = app
+        .vowifi_runtime
+        .refresh_identity_with_timeout(
+            &app.dbus_conn,
+            std::time::Duration::from_secs(VOWIFI_SIM_IDENTITY_TIMEOUT_SECS),
+        )
+        .await;
+    snapshot.profile
+}
+
+fn disabled_vowifi_status(reason: &str) -> VowifiStatusResponse {
+    let mut status = VowifiStatusResponse::default();
+    status.degraded_reason = Some(reason.to_string());
+    status
+}
+fn vowifi_restore_reason_is_soft_retry(reason: Option<&str>) -> bool {
+    matches!(
+        reason,
+        Some("vowifi_connect_already_running" | "live_connect_already_running")
+    )
+}
+
+async fn reset_vowifi_runtime(app: &AppState, reason: &str) -> VowifiStatusResponse {
+    clear_all_live_runtime().await;
+    // let _ = app.database.clear_vowifi_runtime_events();
+    let snapshot = app.vowifi_runtime.reset_runtime(reason).await;
+    let status = snapshot.status_response();
+    persist_vowifi_runtime_snapshot(app, &status);
+    status
+}
+
+async fn restore_cellular_and_reset_vowifi(app: &AppState, reason: &str) -> VowifiStatusResponse {
+    let current = app.vowifi_runtime.snapshot().await.status_response();
+    let profile_meta = current.profile.profile.as_ref();
+    let profile_id = profile_meta.map(|p| p.profile_id.as_ref());
+
+    // 1. IPSEC Event: 发送 IKEv2 INFORMATIONAL 报文，拆除全部 ESP 安全关联并注销会话
+    let _ = app.database.insert_vowifi_runtime_event(crate::db::NewVowifiRuntimeEvent {
+        trace_id: Some("runtime-stop"),
+        level: "info",
+        phase: "connection_stop",
+        profile_id,
+        event_type: "ike_teardown",
+        detail_json: "{}",
+    });
+
+    if let Err(err) = set_vowifi_airplane_mode(app, false).await {
+        warn!(error = %err, "Failed to disable airplane mode while stopping WiFi Calling");
+    }
+
+    restore_cellular_data_after_vowifi(app).await;
+
+    // 2. SMS Event: 短信路径已释放，成功退回到蜂窝基站数据链路层
+    let _ = app.database.insert_vowifi_runtime_event(crate::db::NewVowifiRuntimeEvent {
+        trace_id: Some("runtime-stop"),
+        level: "info",
+        phase: "connection_stop",
+        profile_id,
+        event_type: "sms_path_released",
+        detail_json: "{}",
+    });
+
+    let status = reset_vowifi_runtime(app, reason).await;
+
+    // 3. SYS Event: WiFi Calling 核心服务运行时已停止
+    let _ = app.database.insert_vowifi_runtime_event(crate::db::NewVowifiRuntimeEvent {
+        trace_id: Some("runtime-stop"),
+        level: "info",
+        phase: "connection_stop",
+        profile_id,
+        event_type: "runtime_stop",
+        detail_json: "{}",
+    });
+
+    status
+}
+
+async fn fallback_to_cellular_and_disable_vowifi_connection(
+    app: &AppState,
+    reason: &str,
+) -> VowifiStatusResponse {
+    if let Err(err) = app.config_manager.set_vowifi_connection_enabled(false) {
+        warn!(error = %err, "Failed to persist WiFi Calling connection disable after fallback");
+    }
+    restore_cellular_and_reset_vowifi(app, reason).await
+}
+
+async fn stop_vowifi_and_restore_cellular(app: &AppState, reason: &str) -> VowifiStatusResponse {
+    let _ = app.config_manager.set_vowifi_connection_enabled(false);
+    restore_cellular_and_reset_vowifi(app, reason).await
+}
+
+fn spawn_vowifi_profile_switch_restore(app: AppState, switch_token: String) {
+    let config = app.config_manager.get_vowifi_config();
+    if !config.feature_enabled {
+        return;
+    }
+    tokio::spawn(async move {
+        run_vowifi_restore_workflow(app, VowifiRestoreWorkflow::profile_switch(switch_token)).await;
+    });
+}
+
+#[derive(Clone)]
+struct VowifiRestoreWorkflow {
+    trigger: VowifiRestoreTrigger,
+    initial_delay: Duration,
+    attempts: u8,
+    retry_delay: Duration,
+    connect_attempts: u8,
+    connect_retry_delay: Duration,
+    start_reason: &'static str,
+    disabled_reason: &'static str,
+    fallback_reason: &'static str,
+}
+
+#[derive(Clone)]
+enum VowifiRestoreTrigger {
+    ProfileSwitch { switch_token: String },
+    BootAutoRestore,
+}
+
+impl VowifiRestoreWorkflow {
+    fn profile_switch(switch_token: String) -> Self {
+        Self {
+            trigger: VowifiRestoreTrigger::ProfileSwitch { switch_token },
+            initial_delay: Duration::from_secs(VOWIFI_PROFILE_SWITCH_RESTORE_INITIAL_DELAY_SECS),
+            attempts: VOWIFI_PROFILE_SWITCH_RESTORE_ATTEMPTS,
+            retry_delay: Duration::from_secs(VOWIFI_PROFILE_SWITCH_RESTORE_RETRY_DELAY_SECS),
+            connect_attempts: VOWIFI_PROFILE_SWITCH_CONNECT_ATTEMPTS,
+            connect_retry_delay: Duration::from_secs(
+                VOWIFI_PROFILE_SWITCH_CONNECT_RETRY_DELAY_SECS,
+            ),
+            start_reason: "vowifi_profile_switch_teardown",
+            disabled_reason: "vowifi_profile_switch_connection_disabled",
+            fallback_reason: "vowifi_profile_switch_restore_failed_cellular_fallback",
+        }
+    }
+
+    fn boot_auto_restore(config: &VowifiConfig) -> Self {
+        Self {
+            trigger: VowifiRestoreTrigger::BootAutoRestore,
+            initial_delay: Duration::from_secs(
+                config.auto_restore_initial_delay_secs.clamp(30, 300),
+            ),
+            attempts: config.auto_restore_attempts.clamp(1, 5),
+            retry_delay: Duration::from_secs(config.auto_restore_retry_delay_secs.clamp(10, 180)),
+            connect_attempts: config.auto_restore_attempts.clamp(1, 5),
+            connect_retry_delay: Duration::from_secs(
+                config.auto_restore_retry_delay_secs.clamp(10, 180),
+            ),
+            start_reason: "vowifi_auto_restore_start",
+            disabled_reason: "vowifi_auto_restore_connection_disabled",
+            fallback_reason: "vowifi_auto_restore_failed_cellular_fallback",
+        }
+    }
+
+    fn switch_token(&self) -> Option<&str> {
+        match &self.trigger {
+            VowifiRestoreTrigger::ProfileSwitch { switch_token } => Some(switch_token.as_str()),
+            VowifiRestoreTrigger::BootAutoRestore => None,
+        }
+    }
+
+    fn is_profile_switch(&self) -> bool {
+        matches!(self.trigger, VowifiRestoreTrigger::ProfileSwitch { .. })
+    }
+
+    fn label(&self) -> &'static str {
+        match self.trigger {
+            VowifiRestoreTrigger::ProfileSwitch { .. } => "profile_switch",
+            VowifiRestoreTrigger::BootAutoRestore => "boot_auto_restore",
+        }
+    }
+}
+
+async fn run_vowifi_restore_workflow(app: AppState, workflow: VowifiRestoreWorkflow) {
+    if workflow.is_profile_switch() {
+        persist_optional_vowifi_restore_phase(
+            &app,
+            &workflow,
+            RestorePhase::TeardownVowifi,
+            Instant::now(),
+            false,
+            false,
+            None,
+            0,
+        );
+        let _ = reset_vowifi_runtime(&app, workflow.start_reason).await;
+    }
+
+    let config = app.config_manager.get_vowifi_config();
+    if !config.feature_enabled || !config.connection_enabled {
+        persist_optional_vowifi_restore_phase(
+            &app,
+            &workflow,
+            RestorePhase::Failed,
+            Instant::now(),
+            false,
+            false,
+            Some("vowifi_connection_disabled"),
+            0,
+        );
+        let _ = stop_vowifi_and_restore_cellular(&app, workflow.disabled_reason).await;
+        return;
+    }
+
+    persist_optional_vowifi_restore_phase(
+        &app,
+        &workflow,
+        RestorePhase::CardResetSettling,
+        Instant::now(),
+        false,
+        false,
+        None,
+        0,
+    );
+    tokio::time::sleep(workflow.initial_delay).await;
+
+    let mut last_status = disabled_vowifi_status("vowifi_restore_not_attempted");
+    let attempts = workflow.attempts.max(1);
+    for attempt in 1..=attempts {
+        let retry_count = attempt.saturating_sub(1);
+        let identity_status =
+            wait_for_vowifi_identity_gate(&app, Some(&workflow), retry_count).await;
+        if !identity_status.readiness.identity_ready || !identity_status.readiness.profile_matched {
+            last_status = identity_status;
+            if attempt < attempts {
+                schedule_vowifi_restore_retry(&app, &workflow, &last_status, attempt).await;
+                continue;
+            }
+            break;
+        }
+
+        if let Err(status) = wait_for_vowifi_sim_auth_gate(&app, Some(&workflow), retry_count).await
+        {
+            last_status = status;
+            if attempt < attempts {
+                schedule_vowifi_restore_retry(&app, &workflow, &last_status, attempt).await;
+                continue;
+            }
+            break;
+        }
+
+        let runtime_started_at = Instant::now();
+        persist_optional_vowifi_restore_phase(
+            &app,
+            &workflow,
+            RestorePhase::RuntimeRestore,
+            runtime_started_at,
+            true,
+            true,
+            None,
+            retry_count,
+        );
+        last_status = connect_vowifi_with_attempts(
+            &app,
+            workflow.connect_attempts,
+            workflow.connect_retry_delay,
+            false,
+        )
+        .await;
+        let readiness = &last_status.readiness;
+        if readiness.sms_ready {
+            persist_optional_vowifi_restore_phase(
+                &app,
+                &workflow,
+                RestorePhase::SmsReady,
+                runtime_started_at,
+                readiness.identity_ready,
+                readiness.sim_auth_ready,
+                None,
+                retry_count,
+            );
+            info!(
+                trigger = workflow.label(),
+                "WiFi Calling restore workflow completed"
+            );
+            return;
+        }
+        if attempt < attempts {
+            schedule_vowifi_restore_retry(&app, &workflow, &last_status, attempt).await;
+        }
+    }
+
+    if vowifi_restore_reason_is_soft_retry(last_status.degraded_reason.as_deref()) {
+        info!(
+            trigger = workflow.label(),
+            reason = last_status.degraded_reason.as_deref().unwrap_or("unknown"),
+            "WiFi Calling restore workflow left active connection attempt in charge"
+        );
+        return;
+    }
+    let readiness = &last_status.readiness;
+    persist_optional_vowifi_restore_phase(
+        &app,
+        &workflow,
+        RestorePhase::Failed,
+        Instant::now(),
+        readiness.identity_ready,
+        readiness.sim_auth_ready,
+        last_status.degraded_reason.as_deref(),
+        attempts,
+    );
+    warn!(
+        trigger = workflow.label(),
+        reason = last_status.degraded_reason.as_deref().unwrap_or("unknown"),
+        "WiFi Calling restore workflow failed after retries"
+    );
+    let _ =
+        fallback_to_cellular_and_disable_vowifi_connection(&app, workflow.fallback_reason).await;
+}
+
+async fn schedule_vowifi_restore_retry(
+    app: &AppState,
+    workflow: &VowifiRestoreWorkflow,
+    last_status: &VowifiStatusResponse,
+    retry_count: u8,
+) {
+    persist_optional_vowifi_restore_phase(
+        app,
+        workflow,
+        RestorePhase::RetryScheduled,
+        Instant::now(),
+        last_status.readiness.identity_ready,
+        last_status.readiness.sim_auth_ready,
+        last_status.degraded_reason.as_deref(),
+        retry_count,
+    );
+    tokio::time::sleep(workflow.retry_delay).await;
+}
+
+async fn wait_for_vowifi_identity_gate(
+    app: &AppState,
+    workflow: Option<&VowifiRestoreWorkflow>,
+    retry_count: u8,
+) -> VowifiStatusResponse {
+    let mut last_status = disabled_vowifi_status("identity_refresh_not_attempted");
+    for gate_attempt in 1..=VOWIFI_RESTORE_IDENTITY_GATE_ATTEMPTS.max(1) {
+        let phase_started_at = Instant::now();
+        let snapshot = app
+            .vowifi_runtime
+            .refresh_identity_with_timeout(
+                &app.dbus_conn,
+                Duration::from_secs(VOWIFI_SIM_IDENTITY_TIMEOUT_SECS),
+            )
+            .await;
+        last_status = snapshot.status_response();
+        persist_vowifi_runtime_snapshot(app, &last_status);
+        let identity_ready = last_status.readiness.identity_ready;
+        let profile_matched = last_status.readiness.profile_matched;
+        let degraded_reason = if identity_ready && profile_matched {
+            None
+        } else if !identity_ready {
+            Some("identity_refresh_not_ready")
+        } else {
+            Some("profile_not_matched")
+        };
+        if let Some(workflow) = workflow {
+            persist_optional_vowifi_restore_phase(
+                app,
+                workflow,
+                RestorePhase::IdentityRefresh,
+                phase_started_at,
+                identity_ready,
+                false,
+                degraded_reason,
+                retry_count,
+            );
+        }
+        if identity_ready && profile_matched {
+            return last_status;
+        }
+        if gate_attempt < VOWIFI_RESTORE_IDENTITY_GATE_ATTEMPTS {
+            tokio::time::sleep(Duration::from_secs(VOWIFI_RESTORE_IDENTITY_GATE_DELAY_SECS)).await;
+        }
+    }
+
+    if last_status.degraded_reason.is_none() {
+        last_status.degraded_reason = Some(if !last_status.readiness.identity_ready {
+            "identity_refresh_not_ready".to_string()
+        } else {
+            "profile_not_matched".to_string()
+        });
+    }
+    persist_vowifi_runtime_snapshot(app, &last_status);
+    last_status
+}
+
+async fn wait_for_vowifi_sim_auth_gate(
+    app: &AppState,
+    workflow: Option<&VowifiRestoreWorkflow>,
+    retry_count: u8,
+) -> Result<(), VowifiStatusResponse> {
+    let sim_auth_started_at = Instant::now();
+    if let Some(workflow) = workflow {
+        persist_optional_vowifi_restore_phase(
+            app,
+            workflow,
+            RestorePhase::SimAuthGate,
+            sim_auth_started_at,
+            true,
+            false,
+            None,
+            retry_count,
+        );
+    }
+
+    if let Err(err) = verify_live_sim_auth_access().await {
+        let mut status = app.vowifi_runtime.snapshot().await.status_response();
+        status.degraded_reason = Some(err.reason);
+        persist_vowifi_runtime_snapshot(app, &status);
+        if let Some(workflow) = workflow {
+            persist_optional_vowifi_restore_phase(
+                app,
+                workflow,
+                RestorePhase::SimAuthGate,
+                sim_auth_started_at,
+                status.readiness.identity_ready,
+                false,
+                status.degraded_reason.as_deref(),
+                retry_count,
+            );
+        }
+        return Err(status);
+    }
+
+    if let Some(workflow) = workflow {
+        persist_optional_vowifi_restore_phase(
+            app,
+            workflow,
+            RestorePhase::SimAuthGate,
+            sim_auth_started_at,
+            true,
+            true,
+            None,
+            retry_count,
+        );
+    }
+    Ok(())
+}
+
+fn persist_optional_vowifi_restore_phase(
+    app: &AppState,
+    workflow: &VowifiRestoreWorkflow,
+    switch_phase: RestorePhase,
+    phase_started_at: Instant,
+    identity_ready: bool,
+    sim_auth_ready: bool,
+    degraded_reason: Option<&str>,
+    retry_count: u8,
+) {
+    if let Some(switch_token) = workflow.switch_token() {
+        persist_vowifi_restore_phase(
+            app,
+            switch_token,
+            switch_phase.as_str(),
+            phase_started_at,
+            identity_ready,
+            sim_auth_ready,
+            degraded_reason,
+            retry_count,
+        );
+    }
+}
+
+async fn set_vowifi_airplane_mode(app: &AppState, enabled: bool) -> Result<(), String> {
+    if enabled {
+        app.airplane_mode_requested.store(true, Ordering::SeqCst);
+    }
+    match set_airplane_mode(&app.dbus_conn, enabled).await {
+        Ok(()) => {
+            app.airplane_mode_requested.store(enabled, Ordering::SeqCst);
+            Ok(())
+        }
+        Err(err) => {
+            if !enabled {
+                app.airplane_mode_requested.store(false, Ordering::SeqCst);
+            }
+            Err(err)
+        }
+    }
+}
+
+async fn pause_cellular_data_for_vowifi(app: &AppState) -> Result<(), String> {
+    if let Err(err) = set_vowifi_airplane_mode(app, false).await {
+        warn!(error = %err, "Failed to keep modem enabled for WiFi Calling SIM access");
+    }
+    if let Ok(profile) = find_nm_modem_connection_pub().await {
+        if let Err(err) = nm_set_autoconnect_pub(&profile, false).await {
+            warn!(error = %err, profile = %profile, "Failed to disable NM autoconnect before WiFi Calling");
+        }
+    }
+    let allow_roaming = app.config_manager.get_roaming_allowed();
+    let apn_config = app.config_manager.get_apn_config();
+    set_data_connection_with_apn(&app.dbus_conn, false, allow_roaming, Some(&apn_config))
+        .await
+        .map_err(|err| err.to_string())
+}
+
+async fn restore_cellular_data_after_vowifi(app: &AppState) {
+    let should_restore_data =
+        app.config_manager.get_data_enabled() && !app.data_user_disabled.load(Ordering::SeqCst);
+    if let Ok(profile) = find_nm_modem_connection_pub().await {
+        if let Err(err) = nm_set_autoconnect_pub(&profile, should_restore_data).await {
+            warn!(error = %err, profile = %profile, "Failed to restore NM autoconnect after WiFi Calling");
+        }
+    }
+    if !should_restore_data {
+        return;
+    }
+    let allow_roaming = app.config_manager.get_roaming_allowed();
+    let apn_config = app.config_manager.get_apn_config();
+    if let Err(err) =
+        set_data_connection_with_apn(&app.dbus_conn, true, allow_roaming, Some(&apn_config)).await
+    {
+        warn!(error = %err, "Failed to restore cellular data after WiFi Calling");
+    }
+}
+
+async fn attempt_vowifi_connect_once(
+    app: &AppState,
+    refresh_identity: bool,
+) -> VowifiStatusResponse {
+    if refresh_identity {
+        app.vowifi_runtime
+            .refresh_identity_with_timeout(
+                &app.dbus_conn,
+                std::time::Duration::from_secs(VOWIFI_SIM_IDENTITY_TIMEOUT_SECS),
+            )
+            .await;
+    }
+    let snapshot = app
+        .vowifi_runtime
+        .connect_live_with_stage_timeout(
+            Some(&app.database),
+            std::time::Duration::from_secs(VOWIFI_LIVE_STAGE_TIMEOUT_SECS),
+        )
+        .await;
+    let status = snapshot.status_response();
+    persist_vowifi_runtime_snapshot(app, &status);
+    status
+}
+
+async fn connect_vowifi_with_attempts(
+    app: &AppState,
+    attempts: u8,
+    retry_delay: std::time::Duration,
+    fallback_to_cellular_on_failure: bool,
+) -> VowifiStatusResponse {
+    let control = app.config_manager.get_vowifi_config();
+    if !control.feature_enabled {
+        return disabled_vowifi_status("vowifi_feature_disabled");
+    }
+
+    let current = app.vowifi_runtime.snapshot().await.status_response();
+    if current.readiness.sms_ready {
+        persist_vowifi_runtime_snapshot(app, &current);
+        return current;
+    }
+
+    let Ok(_connect_guard) = app.vowifi_connect_lock.try_lock() else {
+        let mut status = app.vowifi_runtime.snapshot().await.status_response();
+        if !status.readiness.sms_ready {
+            status.degraded_reason = Some("vowifi_connect_already_running".to_string());
+        }
+        persist_vowifi_runtime_snapshot(app, &status);
+        return status;
+    };
+
+    let current = app.vowifi_runtime.snapshot().await.status_response();
+    if current.readiness.sms_ready {
+        persist_vowifi_runtime_snapshot(app, &current);
+        return current;
+    }
+
+    // let _ = app.database.clear_vowifi_runtime_events();
+    let profile_meta = current.profile.profile.as_ref();
+    let profile_id = profile_meta.map(|p| p.profile_id.as_ref());
+    let _ = app.database.insert_vowifi_runtime_event(crate::db::NewVowifiRuntimeEvent {
+        trace_id: Some("runtime-connect"),
+        level: "info",
+        phase: "connect_start",
+        profile_id,
+        event_type: "connect_start",
+        detail_json: "{}",
+    });
+
+    let attempts = attempts.max(1);
+    if let Err(err) = pause_cellular_data_for_vowifi(app).await {
+        let mut status = disabled_vowifi_status("vowifi_cellular_data_pause_failed");
+        status.degraded_reason = Some(format!("vowifi_cellular_data_pause_failed:{err}"));
+        persist_vowifi_runtime_snapshot(app, &status);
+        return status;
+    }
+
+    let prepared = wait_for_vowifi_identity_gate(app, None, 0).await;
+    if !prepared.readiness.identity_ready || !prepared.readiness.profile_matched {
+        persist_vowifi_runtime_snapshot(app, &prepared);
+        return prepared;
+    }
+
+    if let Err(status) = wait_for_vowifi_sim_auth_gate(app, None, 0).await {
+        persist_vowifi_runtime_snapshot(app, &status);
+        return status;
+    }
+
+    let mut last_status = disabled_vowifi_status("vowifi_connect_not_attempted");
+    for attempt in 1..=attempts {
+        info!(
+            attempt = attempt,
+            attempts = attempts,
+            "WiFi Calling connection attempt started"
+        );
+        last_status = attempt_vowifi_connect_once(app, false).await;
+        if last_status.readiness.sms_ready {
+            return last_status;
+        }
+        if attempt < attempts {
+            tokio::time::sleep(retry_delay).await;
+        }
+    }
+
+    if fallback_to_cellular_on_failure {
+        let fallback_reason = last_status
+            .degraded_reason
+            .as_deref()
+            .map(|reason| format!("vowifi_connect_failed_cellular_fallback:{reason}"))
+            .unwrap_or_else(|| "vowifi_connect_failed_cellular_fallback".to_string());
+        warn!(
+            reason = fallback_reason.as_str(),
+            "WiFi Calling connection attempts exhausted; falling back to cellular"
+        );
+        last_status =
+            fallback_to_cellular_and_disable_vowifi_connection(app, &fallback_reason).await;
+    }
+    last_status
+}
+
+#[derive(Deserialize)]
+pub struct VowifiListQuery {
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+    pub trace_id: Option<String>,
+    pub live: Option<bool>,
+}
+
+#[derive(Deserialize, Default)]
+pub struct VowifiStatusQuery {
+    #[serde(default)]
+    pub live: Option<bool>,
+}
+
+#[derive(Deserialize)]
+pub struct VowifiControlToggleRequest {
+    pub enabled: bool,
+}
+
+pub async fn get_vowifi_profiles_handler() -> (StatusCode, Json<ApiResponse<VowifiProfilesResponse>>)
+{
+    (
+        StatusCode::OK,
+        Json(ApiResponse::success_with_message(
+            "Success",
+            vowifi_diagnostics::list_profiles(),
+        )),
+    )
+}
+
+pub async fn get_vowifi_profile_handler(
+    State(app): State<AppState>,
+) -> (StatusCode, Json<ApiResponse<VowifiProfileMatchResponse>>) {
+    let profile = current_vowifi_profile_match(&app).await;
+    (
+        StatusCode::OK,
+        Json(ApiResponse::success_with_message("Success", profile)),
+    )
+}
+
+async fn current_vowifi_status(app: &AppState, live_probe: bool) -> VowifiStatusResponse {
+    let control = app.config_manager.get_vowifi_config();
+    if !control.feature_enabled {
+        return disabled_vowifi_status("vowifi_feature_disabled");
+    }
+    app.vowifi_runtime
+        .refresh_identity_with_timeout(
+            &app.dbus_conn,
+            std::time::Duration::from_secs(VOWIFI_SIM_IDENTITY_TIMEOUT_SECS),
+        )
+        .await;
+    let snapshot = if live_probe && control.connection_enabled {
+        app.vowifi_runtime
+            .refresh_status_readiness_with_stage_timeout(
+                Some(&app.database),
+                std::time::Duration::from_secs(VOWIFI_STATUS_STAGE_TIMEOUT_SECS),
+            )
+            .await
+    } else {
+        app.vowifi_runtime.snapshot().await
+    };
+    let mut status = snapshot.status_response();
+    if !control.connection_enabled {
+        status.phase = "not_started";
+    }
+    persist_vowifi_runtime_snapshot(app, &status);
+    status
+}
+
+pub async fn get_vowifi_control_handler(
+    State(app): State<AppState>,
+) -> (StatusCode, Json<ApiResponse<VowifiConfig>>) {
+    (
+        StatusCode::OK,
+        Json(ApiResponse::success_with_message(
+            "Success",
+            app.config_manager.get_vowifi_config(),
+        )),
+    )
+}
+
+pub async fn set_vowifi_feature_handler(
+    State(app): State<AppState>,
+    Json(payload): Json<VowifiControlToggleRequest>,
+) -> (StatusCode, Json<ApiResponse<VowifiConfig>>) {
+    match app
+        .config_manager
+        .set_vowifi_feature_enabled(payload.enabled)
+    {
+        Ok(config) => {
+            if !payload.enabled {
+                if let Err(err) = set_vowifi_airplane_mode(&app, false).await {
+                    warn!(error = %err, "Failed to disable airplane mode after WiFi Calling feature disable");
+                }
+                let _ = reset_vowifi_runtime(&app, "vowifi_feature_disabled").await;
+            }
+            (
+                StatusCode::OK,
+                Json(ApiResponse::success_with_message("Success", config)),
+            )
+        }
+        Err(err) => (
+            StatusCode::OK,
+            Json(ApiResponse::<VowifiConfig>::error(format!("Failed: {err}"))),
+        ),
+    }
+}
+
+pub async fn set_vowifi_connection_handler(
+    State(app): State<AppState>,
+    Json(payload): Json<VowifiControlToggleRequest>,
+) -> (StatusCode, Json<ApiResponse<VowifiStatusResponse>>) {
+    if !app.config_manager.get_vowifi_config().feature_enabled {
+        return (
+            StatusCode::OK,
+            Json(ApiResponse::<VowifiStatusResponse>::error(
+                "Failed: vowifi_feature_disabled",
+            )),
+        );
+    }
+
+    if !payload.enabled {
+        let status = stop_vowifi_and_restore_cellular(&app, "vowifi_connection_disabled").await;
+        return (
+            StatusCode::OK,
+            Json(ApiResponse::success_with_message("Success", status)),
+        );
+    }
+
+    if let Err(err) = app.config_manager.set_vowifi_connection_enabled(true) {
+        return (
+            StatusCode::OK,
+            Json(ApiResponse::<VowifiStatusResponse>::error(format!(
+                "Failed: {err}"
+            ))),
+        );
+    }
+    let status = connect_vowifi_with_attempts(
+        &app,
+        VOWIFI_MANUAL_CONNECT_ATTEMPTS,
+        std::time::Duration::from_secs(VOWIFI_MANUAL_CONNECT_RETRY_DELAY_SECS),
+        true,
+    )
+    .await;
+    (
+        StatusCode::OK,
+        Json(ApiResponse::success_with_message("Success", status)),
+    )
+}
+
+pub fn spawn_vowifi_auto_restore(app: AppState) {
+    tokio::spawn(async move {
+        let config = app.config_manager.get_vowifi_config();
+        if !config.feature_enabled || !config.connection_enabled {
+            return;
+        }
+        let workflow = VowifiRestoreWorkflow::boot_auto_restore(&config);
+        info!(
+            initial_delay_secs = workflow.initial_delay.as_secs(),
+            attempts = workflow.attempts,
+            "WiFi Calling auto-restore scheduled"
+        );
+        run_vowifi_restore_workflow(app, workflow).await;
+    });
+}
+
+pub async fn connect_vowifi_handler(
+    State(app): State<AppState>,
+) -> (StatusCode, Json<ApiResponse<VowifiStatusResponse>>) {
+    if !app.config_manager.get_vowifi_config().feature_enabled {
+        return (
+            StatusCode::OK,
+            Json(ApiResponse::<VowifiStatusResponse>::error(
+                "Failed: vowifi_feature_disabled",
+            )),
+        );
+    }
+    if let Err(err) = app.config_manager.set_vowifi_connection_enabled(true) {
+        return (
+            StatusCode::OK,
+            Json(ApiResponse::<VowifiStatusResponse>::error(format!(
+                "Failed: {err}"
+            ))),
+        );
+    }
+    let status = connect_vowifi_with_attempts(
+        &app,
+        VOWIFI_MANUAL_CONNECT_ATTEMPTS,
+        std::time::Duration::from_secs(VOWIFI_MANUAL_CONNECT_RETRY_DELAY_SECS),
+        true,
+    )
+    .await;
+    (
+        StatusCode::OK,
+        Json(ApiResponse::success_with_message("Success", status)),
+    )
+}
+
+fn persist_vowifi_runtime_snapshot(app: &AppState, status: &VowifiStatusResponse) {
+    let profile_meta = status.profile.profile.as_ref();
+    if let Err(err) =
+        app.database
+            .upsert_vowifi_runtime_snapshot(crate::db::NewVowifiRuntimeSnapshot {
+                phase: status.phase,
+                profile_id: profile_meta.map(|profile| profile.profile_id),
+                plmn: profile_meta.map(|profile| profile.plmn),
+                identity_ready: status.readiness.identity_ready,
+                sim_auth_ready: status.readiness.sim_auth_ready,
+                profile_matched: status.readiness.profile_matched,
+                epdg_ready: status.readiness.epdg_ready,
+                ike_ready: status.readiness.ike_ready,
+                child_sa_ready: status.readiness.child_sa_ready,
+                esp_ready: status.readiness.esp_ready,
+                ims_registered: status.readiness.ims_registered,
+                sms_ready: status.readiness.sms_ready,
+                degraded_reason: status.degraded_reason.as_deref(),
+            })
+    {
+        warn!(error = %err, "Failed to persist VoWiFi runtime snapshot");
+    }
+}
+
+pub async fn get_vowifi_status_handler(
+    Query(query): Query<VowifiStatusQuery>,
+    State(app): State<AppState>,
+) -> (StatusCode, Json<ApiResponse<VowifiStatusResponse>>) {
+    let status = current_vowifi_status(&app, query.live.unwrap_or(true)).await;
+    (
+        StatusCode::OK,
+        Json(ApiResponse::success_with_message("Success", status)),
+    )
+}
+
+pub async fn get_vowifi_diagnostics_handler(
+    Query(query): Query<VowifiListQuery>,
+    State(app): State<AppState>,
+) -> (StatusCode, Json<ApiResponse<VowifiDiagnosticsResponse>>) {
+    let status = current_vowifi_status(&app, query.live.unwrap_or(true)).await;
+    let trace_filter = query
+        .trace_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+
+    let persisted_snapshot = match app.database.get_vowifi_runtime_snapshot() {
+        Ok(snapshot) => snapshot,
+        Err(err) => {
+            return (
+                StatusCode::OK,
+                Json(ApiResponse::error(format!("Failed: {}", err))),
+            )
+        }
+    };
+    let events = match app.database.get_vowifi_runtime_events_filtered(
+        query.limit.unwrap_or(100),
+        query.offset.unwrap_or(0),
+        trace_filter.as_deref(),
+    ) {
+        Ok(events) => events,
+        Err(err) => {
+            return (
+                StatusCode::OK,
+                Json(ApiResponse::error(format!("Failed: {}", err))),
+            )
+        }
+    };
+    let sms_deliveries = match app.database.get_vowifi_sms_deliveries(200, 0) {
+        Ok(deliveries) => deliveries,
+        Err(err) => {
+            return (
+                StatusCode::OK,
+                Json(ApiResponse::error(format!("Failed: {}", err))),
+            )
+        }
+    };
+    let soak_runs = match app.database.get_vowifi_soak_runs(20, 0) {
+        Ok(runs) => runs,
+        Err(err) => {
+            return (
+                StatusCode::OK,
+                Json(ApiResponse::error(format!("Failed: {}", err))),
+            )
+        }
+    };
+    let restore = match app.database.get_vowifi_esim_restore() {
+        Ok(restore) => restore,
+        Err(err) => {
+            return (
+                StatusCode::OK,
+                Json(ApiResponse::error(format!("Failed: {}", err))),
+            )
+        }
+    };
+
+    let diagnostics = vowifi_diagnostics::build_diagnostics_response(
+        status,
+        persisted_snapshot,
+        events,
+        sms_deliveries,
+        soak_runs,
+        restore,
+        trace_filter,
+    );
+
+    (
+        StatusCode::OK,
+        Json(ApiResponse::success_with_message("Success", diagnostics)),
+    )
+}
+
+pub async fn get_vowifi_events_handler(
+    Query(query): Query<VowifiListQuery>,
+    State(app): State<AppState>,
+) -> (StatusCode, Json<ApiResponse<VowifiRuntimeEventsResponse>>) {
+    match app.database.get_vowifi_runtime_events_filtered(
+        query.limit.unwrap_or(100),
+        query.offset.unwrap_or(0),
+        query.trace_id.as_deref(),
+    ) {
+        Ok(events) => (
+            StatusCode::OK,
+            Json(ApiResponse::success_with_message("Success", events)),
+        ),
+        Err(err) => (
+            StatusCode::OK,
+            Json(ApiResponse::error(format!("Failed: {}", err))),
+        ),
+    }
+}
+
+pub async fn get_vowifi_soak_runs_handler(
+    Query(query): Query<VowifiListQuery>,
+    State(app): State<AppState>,
+) -> (StatusCode, Json<ApiResponse<VowifiSoakRunsResponse>>) {
+    match app
+        .database
+        .get_vowifi_soak_runs(query.limit.unwrap_or(20), query.offset.unwrap_or(0))
+    {
+        Ok(runs) => (
+            StatusCode::OK,
+            Json(ApiResponse::success_with_message("Success", runs)),
+        ),
+        Err(err) => (
+            StatusCode::OK,
+            Json(ApiResponse::error(format!("Failed: {}", err))),
+        ),
+    }
+}
+
+pub async fn get_vowifi_sms_deliveries_handler(
+    Query(query): Query<VowifiListQuery>,
+    State(app): State<AppState>,
+) -> (StatusCode, Json<ApiResponse<VowifiSmsDeliveriesResponse>>) {
+    match app
+        .database
+        .get_vowifi_sms_deliveries(query.limit.unwrap_or(50), query.offset.unwrap_or(0))
+    {
+        Ok(deliveries) => (
+            StatusCode::OK,
+            Json(ApiResponse::success_with_message("Success", deliveries)),
+        ),
+        Err(err) => (
+            StatusCode::OK,
+            Json(ApiResponse::error(format!("Failed: {}", err))),
+        ),
+    }
+}
+
+pub async fn get_vowifi_sms_delivery_handler(
+    Path(message_id): Path<String>,
+    State(app): State<AppState>,
+) -> (
+    StatusCode,
+    Json<ApiResponse<Option<crate::db::VowifiSmsDeliveryEntry>>>,
+) {
+    match app.database.get_vowifi_sms_delivery(&message_id) {
+        Ok(delivery) => (
+            StatusCode::OK,
+            Json(ApiResponse::success_with_message("Success", delivery)),
+        ),
+        Err(err) => (
+            StatusCode::OK,
+            Json(ApiResponse::error(format!("Failed: {}", err))),
+        ),
+    }
+}
+
+pub async fn get_vowifi_esim_restore_handler(
+    State(app): State<AppState>,
+) -> (
+    StatusCode,
+    Json<ApiResponse<Option<VowifiEsimRestoreEntry>>>,
+) {
+    match app.database.get_vowifi_esim_restore() {
+        Ok(restore) => (
+            StatusCode::OK,
+            Json(ApiResponse::success_with_message("Success", restore)),
+        ),
+        Err(err) => (
+            StatusCode::OK,
+            Json(ApiResponse::error(format!("Failed: {}", err))),
+        ),
+    }
 }
 
 pub async fn get_voicemail_status_handler() -> impl IntoResponse {
@@ -4492,5 +5952,63 @@ mod tests {
         assert_eq!(temperature_sensor_label("cpu0-1-thermal", ""), "CPU 0-1");
         assert_eq!(temperature_sensor_label("core2_3_temp", ""), "核心 2-3");
         assert_eq!(temperature_sensor_label("wifi_sensor", ""), "Wi-Fi");
+    }
+
+    #[test]
+    fn vowifi_mt_storage_key_preserves_repeated_identical_replies() {
+        let first = crate::vowifi::sms::MoSmsSipOutcome {
+            trace_id: "trace-a".to_string(),
+            message_id: "mo-a".to_string(),
+            sip_status: 202,
+            rpdu_ack: crate::vowifi::sms::RpduAckState::None,
+            delivery_state: crate::vowifi::sms::SmsDeliveryState::Accepted,
+            failure_cause: None,
+            mt_deliveries: Vec::new(),
+        };
+        let mut second = first.clone();
+        second.trace_id = "trace-b".to_string();
+        second.message_id = "mo-b".to_string();
+
+        let first_key = vowifi_mt_storage_key(&first, "10086", "You don't have any credit balance");
+        let second_key =
+            vowifi_mt_storage_key(&second, "10086", "You don't have any credit balance");
+
+        assert_ne!(first_key, second_key);
+    }
+
+    #[test]
+    fn vowifi_mt_complete_group_count_collapses_segments() {
+        let outcome = crate::vowifi::sms::MoSmsSipOutcome {
+            trace_id: "trace-a".to_string(),
+            message_id: "mo-a".to_string(),
+            sip_status: 202,
+            rpdu_ack: crate::vowifi::sms::RpduAckState::None,
+            delivery_state: crate::vowifi::sms::SmsDeliveryState::Accepted,
+            failure_cause: None,
+            mt_deliveries: vec![
+                crate::vowifi::sms::MtSmsDeliver {
+                    rp_message_reference: 1,
+                    originator: "10086".to_string(),
+                    text: "part1".to_string(),
+                    user_data_bytes: 5,
+                    service_center_timestamp: "2026-06-22 13:13:59".to_string(),
+                    segment_reference: Some(7),
+                    segment_sequence: 1,
+                    segment_total: 2,
+                },
+                crate::vowifi::sms::MtSmsDeliver {
+                    rp_message_reference: 2,
+                    originator: "10086".to_string(),
+                    text: "part2".to_string(),
+                    user_data_bytes: 5,
+                    service_center_timestamp: "2026-06-22 13:13:59".to_string(),
+                    segment_reference: Some(7),
+                    segment_sequence: 2,
+                    segment_total: 2,
+                },
+            ],
+        };
+
+        assert_eq!(vowifi_mt_complete_group_count(&outcome), 1);
     }
 }

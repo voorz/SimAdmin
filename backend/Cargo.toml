@@ -28,6 +28,10 @@ regex-automata = "0.4.13"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 zip = { version = "0.6.6", default-features = false, features = ["deflate"] }
+num-bigint = "0.4"
+num-traits = "0.2"
+aes = "0.8"
+cbc = { version = "0.1", features = ["alloc"] }
 
 [profile.release]
 strip = true

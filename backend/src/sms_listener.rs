@@ -5,13 +5,14 @@
 use crate::db::{
     beijing_sms_now_string, normalize_sms_timestamp_for_display, Database, SmsMessage,
 };
+use crate::config::ConfigManager;
 use crate::modem_manager::{cache_smsc_for_identity, current_sim_identity, find_modem_path};
 use crate::notification::NotificationSender;
 use futures_util::StreamExt;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::time::{Duration, MissedTickBehavior};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use zbus::zvariant::{OwnedObjectPath, OwnedValue};
 use zbus::{Connection, MessageStream, Proxy};
 
@@ -272,6 +273,7 @@ async fn process_sms_path(
                 timestamp,
                 status: "received".to_string(),
                 pdu: Some(marker),
+                transport: "modem".to_string(),
             };
             if should_forward_after_insert(mode, forward_reconciled_new_sms) {
                 let notification_sender = Arc::clone(notification_sender);
@@ -292,6 +294,38 @@ async fn list_sms_paths(conn: &Connection, modem_path: &str) -> zbus::Result<Vec
     let proxy = Proxy::new(conn, MM_SERVICE, modem_path, MM_MESSAGING).await?;
     let paths: Vec<OwnedObjectPath> = proxy.call("List", &()).await?;
     Ok(paths.into_iter().map(|path| path.to_string()).collect())
+}
+
+fn modem_sms_paused_for_vowifi(config_manager: &ConfigManager) -> bool {
+    let config = config_manager.get_vowifi_config();
+    config.feature_enabled && config.connection_enabled
+}
+
+async fn maybe_scan_sms_paths(
+    conn: &Connection,
+    db: &Database,
+    notification_sender: &Arc<NotificationSender>,
+    modem_path: &str,
+    reason: &str,
+    forward_new_sms: bool,
+    config_manager: &ConfigManager,
+) {
+    if modem_sms_paused_for_vowifi(config_manager) {
+        debug!(
+            reason = %reason,
+            "Skipping ModemManager SMS scan while WiFi Calling connection is enabled"
+        );
+        return;
+    }
+    scan_sms_paths(
+        conn,
+        db,
+        notification_sender,
+        modem_path,
+        reason,
+        forward_new_sms,
+    )
+    .await;
 }
 
 async fn scan_sms_paths(
@@ -343,16 +377,18 @@ async fn scan_current_modem_or_rebind(
     modem_path: &str,
     reason: &str,
     forward_new_sms: bool,
+    config_manager: &ConfigManager,
 ) -> bool {
     match find_modem_path(conn).await {
         Ok(current_path) if current_path == modem_path => {
-            scan_sms_paths(
+            maybe_scan_sms_paths(
                 conn,
                 db,
                 notification_sender,
                 modem_path,
                 reason,
                 forward_new_sms,
+                config_manager,
             )
             .await;
             true
@@ -364,13 +400,14 @@ async fn scan_current_modem_or_rebind(
                 reason = %reason,
                 "SMS listener detected modem path change"
             );
-            scan_sms_paths(
+            maybe_scan_sms_paths(
                 conn,
                 db,
                 notification_sender,
                 current_path.as_str(),
                 reason,
                 false,
+                config_manager,
             )
             .await;
             false
@@ -404,6 +441,7 @@ pub async fn start_sms_listener(
     conn: Connection,
     db: Arc<Database>,
     notification_sender: Arc<NotificationSender>,
+    config_manager: Arc<ConfigManager>,
     mut resync_receiver: SmsResyncReceiver,
 ) -> zbus::Result<()> {
     info!("Starting SMS listener (ModemManager mode)");
@@ -438,13 +476,14 @@ pub async fn start_sms_listener(
 
         info!(modem_path = %modem_path, "SMS listener registered, waiting for messages...");
 
-        scan_sms_paths(
+        maybe_scan_sms_paths(
             &conn,
             &db,
             &notification_sender,
             modem_path.as_str(),
             "initial",
             false,
+            &config_manager,
         )
         .await;
 
@@ -502,6 +541,7 @@ pub async fn start_sms_listener(
                         modem_path.as_str(),
                         "poll",
                         true,
+                        &config_manager,
                     ).await {
                         break;
                     }
@@ -515,6 +555,7 @@ pub async fn start_sms_listener(
                         modem_path.as_str(),
                         request.reason.as_str(),
                         false,
+                        &config_manager,
                     ).await {
                         break;
                     }
@@ -571,5 +612,25 @@ mod tests {
             SmsIngestMode::Reconcile,
             false
         ));
+    }
+
+    #[test]
+    fn pauses_modem_sms_when_vowifi_connection_is_enabled() {
+        let path = std::env::temp_dir().join(format!(
+            "simadmin-sms-listener-vowifi-{}-{}.json",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        let manager = ConfigManager::new(path.clone());
+
+        assert!(!modem_sms_paused_for_vowifi(&manager));
+        manager.set_vowifi_feature_enabled(true).unwrap();
+        assert!(!modem_sms_paused_for_vowifi(&manager));
+        manager.set_vowifi_connection_enabled(true).unwrap();
+        assert!(modem_sms_paused_for_vowifi(&manager));
+        manager.set_vowifi_connection_enabled(false).unwrap();
+        assert!(!modem_sms_paused_for_vowifi(&manager));
+
+        let _ = std::fs::remove_file(path);
     }
 }

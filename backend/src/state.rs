@@ -17,6 +17,7 @@ use crate::esim::EsimSupervisor;
 use crate::notification::NotificationSender;
 use crate::sms_listener::SmsResyncHandle;
 use crate::system_event::SystemEventEmitter;
+use crate::vowifi::runtime::VowifiRuntime;
 
 #[derive(Clone)]
 pub struct ActiveCallRecord {
@@ -49,6 +50,8 @@ pub struct AppState {
     /// 用户在界面关闭蜂窝数据后，禁止 init/watchdog 自动再次 Connect。
     pub data_user_disabled: Arc<AtomicBool>,
     pub airplane_mode_requested: Arc<AtomicBool>,
+    pub vowifi_runtime: Arc<VowifiRuntime>,
+    pub vowifi_connect_lock: Arc<Mutex<()>>,
     /// 小区/信号轮询是否已按需唤醒。
     pub cell_monitoring_active: Arc<AtomicBool>,
 }
@@ -66,6 +69,7 @@ impl AppState {
         sms_resync: SmsResyncHandle,
         data_user_disabled: Arc<AtomicBool>,
         airplane_mode_requested: Arc<AtomicBool>,
+        vowifi_runtime: Arc<VowifiRuntime>,
         cell_monitoring_active: Arc<AtomicBool>,
     ) -> Self {
         Self {
@@ -82,6 +86,8 @@ impl AppState {
             cell_lock: Arc::new(Mutex::new(CellLockStore::default())),
             data_user_disabled,
             airplane_mode_requested,
+            vowifi_runtime,
+            vowifi_connect_lock: Arc::new(Mutex::new(())),
             cell_monitoring_active,
         }
     }
@@ -129,6 +135,12 @@ impl FromRef<AppState> for Arc<DdnsManager> {
 impl FromRef<AppState> for Arc<EsimSupervisor> {
     fn from_ref(state: &AppState) -> Self {
         state.esim_supervisor.clone()
+    }
+}
+
+impl FromRef<AppState> for Arc<VowifiRuntime> {
+    fn from_ref(state: &AppState) -> Self {
+        state.vowifi_runtime.clone()
     }
 }
 

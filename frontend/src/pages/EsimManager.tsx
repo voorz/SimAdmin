@@ -589,6 +589,7 @@ export default function EsimManagerPage() {
   const [basebandRecoverySteps, setBasebandRecoverySteps] = useState<BasebandRestartStep[]>([])
   const [basebandRecoveryRegistration, setBasebandRecoveryRegistration] = useState<string | null>(null)
   const basebandRecoveryTimerRef = useRef<number | undefined>(undefined)
+  const [vowifiEnabled, setVowifiEnabled] = useState(false)
 
   const euiccCardRef = useRef<HTMLDivElement | null>(null)
   const [gridHeight, setGridHeight] = useState<string | number>('calc(100vh - 350px)')
@@ -822,6 +823,12 @@ export default function EsimManagerPage() {
     }
 
     try {
+      void api.getVowifiControl().then((res) => {
+        if (res.data) {
+          setVowifiEnabled(res.data.connection_enabled)
+        }
+      }).catch(() => { /* ignore */ })
+
       let hasProfiles = profiles.length > 0
 
       if (!forceLive) {
@@ -955,6 +962,12 @@ export default function EsimManagerPage() {
     setBasebandRecoverySteps([])
     setBasebandRecoveryRegistration(null)
 
+    void api.getVowifiControl().then((res) => {
+      if (res.data) {
+        setVowifiEnabled(res.data.connection_enabled)
+      }
+    }).catch(() => { /* ignore */ })
+
     const handleStatusResult = (finished: boolean) => {
       if (finished) {
         if (basebandRecoveryTimerRef.current !== undefined) {
@@ -989,7 +1002,7 @@ export default function EsimManagerPage() {
     const errorStep = getRecoveryErrorStep()
     if (errorStep) return errorStep.detail || `${errorStep.step} 失败`
     if (!basebandRecoveryRunning && basebandRecoverySteps.length > 0) {
-      return '网络恢复成功！'
+      return vowifiEnabled ? '网络和 VoWiFi 恢复成功！' : '网络恢复成功！'
     }
     if (basebandRecoverySteps.length === 0) return '正在启动恢复程序...'
     const lastStep = basebandRecoverySteps[basebandRecoverySteps.length - 1]

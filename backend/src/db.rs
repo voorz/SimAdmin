@@ -21,6 +21,12 @@ pub struct SmsMessage {
     pub timestamp: String,    // ISO 8601 格式时间
     pub status: String,       // "pending", "sent", "failed", "received"
     pub pdu: Option<String>,  // 原始 PDU（如果有）
+    #[serde(default = "default_sms_transport")]
+    pub transport: String,
+}
+
+fn default_sms_transport() -> String {
+    "modem".to_string()
 }
 
 /// 通话记录
@@ -221,6 +227,198 @@ pub struct EsimEuiccCacheEntry {
 }
 
 /// 数据库管理器
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct VowifiRuntimeEventEntry {
+    pub id: i64,
+    pub trace_id: Option<String>,
+    pub level: String,
+    pub phase: String,
+    pub profile_id: Option<String>,
+    pub event_type: String,
+    pub detail_json: String,
+    pub created_at: String,
+}
+
+pub struct NewVowifiRuntimeEvent<'a> {
+    pub trace_id: Option<&'a str>,
+    pub level: &'a str,
+    pub phase: &'a str,
+    pub profile_id: Option<&'a str>,
+    pub event_type: &'a str,
+    pub detail_json: &'a str,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct VowifiRuntimeEventsResponse {
+    pub events: Vec<VowifiRuntimeEventEntry>,
+    pub total: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct VowifiRuntimeSnapshotEntry {
+    pub phase: String,
+    pub profile_id: Option<String>,
+    pub plmn: Option<String>,
+    pub identity_ready: bool,
+    pub sim_auth_ready: bool,
+    pub profile_matched: bool,
+    pub epdg_ready: bool,
+    pub ike_ready: bool,
+    pub child_sa_ready: bool,
+    pub esp_ready: bool,
+    pub ims_registered: bool,
+    pub sms_ready: bool,
+    pub degraded_reason: Option<String>,
+    pub updated_at: String,
+}
+
+pub struct NewVowifiRuntimeSnapshot<'a> {
+    pub phase: &'a str,
+    pub profile_id: Option<&'a str>,
+    pub plmn: Option<&'a str>,
+    pub identity_ready: bool,
+    pub sim_auth_ready: bool,
+    pub profile_matched: bool,
+    pub epdg_ready: bool,
+    pub ike_ready: bool,
+    pub child_sa_ready: bool,
+    pub esp_ready: bool,
+    pub ims_registered: bool,
+    pub sms_ready: bool,
+    pub degraded_reason: Option<&'a str>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct VowifiSmsPartEntry {
+    pub message_id: String,
+    pub reference: i64,
+    pub sequence: i64,
+    pub total: i64,
+    pub received: bool,
+    pub updated_at: String,
+}
+
+pub struct NewVowifiSmsPart<'a> {
+    pub message_id: &'a str,
+    pub reference: i64,
+    pub sequence: i64,
+    pub total: i64,
+    pub received: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct VowifiSmsDeliveryEntry {
+    pub message_id: String,
+    pub trace_id: String,
+    pub direction: String,
+    pub state: String,
+    pub sip_state: String,
+    pub rpdu_ack: String,
+    pub delivery_reported: bool,
+    pub failure_cause: Option<String>,
+    pub retry_count: i64,
+    pub api_sms_id: Option<i64>,
+    pub parts: Vec<VowifiSmsPartEntry>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+pub struct NewVowifiSmsDelivery<'a> {
+    pub message_id: &'a str,
+    pub trace_id: &'a str,
+    pub direction: &'a str,
+    pub state: &'a str,
+    pub sip_state: &'a str,
+    pub rpdu_ack: &'a str,
+    pub delivery_reported: bool,
+    pub failure_cause: Option<&'a str>,
+    pub retry_count: i64,
+    pub api_sms_id: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct VowifiSmsDeliveriesResponse {
+    pub deliveries: Vec<VowifiSmsDeliveryEntry>,
+    pub total: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct VowifiEsimRestoreEntry {
+    pub switch_token: Option<String>,
+    pub switch_phase: Option<String>,
+    pub phase_ms: Option<i64>,
+    pub identity_ready: bool,
+    pub sim_auth_ready: bool,
+    pub degraded_reason: Option<String>,
+    pub retry_count: i64,
+    pub updated_at: String,
+}
+
+pub struct NewVowifiEsimRestore<'a> {
+    pub switch_token: Option<&'a str>,
+    pub switch_phase: Option<&'a str>,
+    pub phase_ms: Option<i64>,
+    pub identity_ready: bool,
+    pub sim_auth_ready: bool,
+    pub degraded_reason: Option<&'a str>,
+    pub retry_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct VowifiSoakSampleEntry {
+    pub id: i64,
+    pub run_id: String,
+    pub sample_kind: String,
+    pub metric_name: String,
+    pub metric_value: i64,
+    pub state: String,
+    pub created_at: String,
+}
+
+pub struct NewVowifiSoakSample<'a> {
+    pub run_id: &'a str,
+    pub sample_kind: &'a str,
+    pub metric_name: &'a str,
+    pub metric_value: i64,
+    pub state: &'a str,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct VowifiSoakRunEntry {
+    pub run_id: String,
+    pub scenario_id: String,
+    pub profile_id: Option<String>,
+    pub plmn: Option<String>,
+    pub status: String,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+    pub duration_seconds: i64,
+    pub sample_count: i64,
+    pub failure_count: i64,
+    pub last_error: Option<String>,
+    pub sensitive_values_policy: String,
+    pub samples: Vec<VowifiSoakSampleEntry>,
+}
+
+pub struct NewVowifiSoakRun<'a> {
+    pub run_id: &'a str,
+    pub scenario_id: &'a str,
+    pub profile_id: Option<&'a str>,
+    pub plmn: Option<&'a str>,
+    pub status: &'a str,
+    pub duration_seconds: i64,
+    pub sample_count: i64,
+    pub failure_count: i64,
+    pub last_error: Option<&'a str>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct VowifiSoakRunsResponse {
+    pub runs: Vec<VowifiSoakRunEntry>,
+    pub total: i64,
+    pub read_only: bool,
+}
+
 pub struct Database {
     conn: Arc<Mutex<Connection>>,
 }
@@ -307,6 +505,423 @@ fn notification_log_date_bound(value: &str, suffix: &str) -> String {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_database() -> Database {
+        Database::new(PathBuf::from(":memory:")).expect("create test database")
+    }
+
+    #[test]
+    fn vowifi_runtime_snapshot_round_trips_without_sensitive_identity() {
+        let db = test_database();
+
+        assert!(db
+            .get_vowifi_runtime_snapshot()
+            .expect("read empty snapshot")
+            .is_none());
+
+        db.upsert_vowifi_runtime_snapshot(NewVowifiRuntimeSnapshot {
+            phase: "profile_matched",
+            profile_id: Some("gb_ee_23433"),
+            plmn: Some("23433"),
+            identity_ready: true,
+            sim_auth_ready: false,
+            profile_matched: true,
+            epdg_ready: false,
+            ike_ready: false,
+            child_sa_ready: false,
+            esp_ready: false,
+            ims_registered: false,
+            sms_ready: false,
+            degraded_reason: None,
+        })
+        .expect("write snapshot");
+
+        let snapshot = db
+            .get_vowifi_runtime_snapshot()
+            .expect("read snapshot")
+            .expect("snapshot exists");
+        assert_eq!(snapshot.phase, "profile_matched");
+        assert_eq!(snapshot.profile_id.as_deref(), Some("gb_ee_23433"));
+        assert_eq!(snapshot.plmn.as_deref(), Some("23433"));
+        assert!(snapshot.identity_ready);
+        assert!(snapshot.profile_matched);
+        assert!(!snapshot.sms_ready);
+    }
+
+    #[test]
+    fn vowifi_sms_delivery_round_trips_with_parts() {
+        let db = test_database();
+
+        db.upsert_vowifi_sms_delivery(NewVowifiSmsDelivery {
+            message_id: "msg-1",
+            trace_id: "trace-1",
+            direction: "mo",
+            state: "accepted",
+            sip_state: "accepted",
+            rpdu_ack: "acked",
+            delivery_reported: false,
+            failure_cause: None,
+            retry_count: 0,
+            api_sms_id: None,
+        })
+        .expect("write delivery");
+        db.upsert_vowifi_sms_part(NewVowifiSmsPart {
+            message_id: "msg-1",
+            reference: 7,
+            sequence: 1,
+            total: 2,
+            received: true,
+        })
+        .expect("write first part");
+        db.upsert_vowifi_sms_part(NewVowifiSmsPart {
+            message_id: "msg-1",
+            reference: 7,
+            sequence: 2,
+            total: 2,
+            received: true,
+        })
+        .expect("write second part");
+
+        let delivery = db
+            .get_vowifi_sms_delivery("msg-1")
+            .expect("read delivery")
+            .expect("delivery exists");
+        assert_eq!(delivery.state, "accepted");
+        assert_eq!(delivery.rpdu_ack, "acked");
+        assert_eq!(delivery.parts.len(), 2);
+
+        let deliveries = db
+            .get_vowifi_sms_deliveries(10, 0)
+            .expect("list deliveries");
+        assert_eq!(deliveries.total, 1);
+        assert_eq!(deliveries.deliveries[0].parts.len(), 2);
+    }
+
+    #[test]
+    fn deleting_sms_unlinks_vowifi_delivery_api_reference() {
+        let db = test_database();
+        let sms_id = db
+            .insert_sms(
+                "incoming",
+                "10086",
+                "redacted test body",
+                "received",
+                Some("marker-1"),
+            )
+            .expect("insert sms");
+
+        db.upsert_vowifi_sms_delivery(NewVowifiSmsDelivery {
+            message_id: "msg-delete",
+            trace_id: "trace-delete",
+            direction: "mobile_terminated",
+            state: "received",
+            sip_state: "accepted",
+            rpdu_ack: "acked",
+            delivery_reported: true,
+            failure_cause: None,
+            retry_count: 0,
+            api_sms_id: Some(sms_id),
+        })
+        .expect("write delivery");
+
+        assert_eq!(db.delete_sms(sms_id).expect("delete sms"), 1);
+        let delivery = db
+            .get_vowifi_sms_delivery("msg-delete")
+            .expect("read delivery")
+            .expect("delivery remains for diagnostics");
+        assert_eq!(delivery.api_sms_id, None);
+    }
+
+    #[test]
+    fn sms_lists_use_id_as_timestamp_tiebreaker() {
+        let db = test_database();
+
+        let first = db
+            .insert_sms_at(
+                "outgoing",
+                "10086",
+                "CHECK",
+                "2026-06-22 13:13:59",
+                "sent",
+                None,
+            )
+            .expect("insert outgoing");
+        let second = db
+            .insert_sms_at(
+                "incoming",
+                "10086",
+                "reply",
+                "2026-06-22 13:13:59",
+                "received",
+                Some("vowifi-mt:test"),
+            )
+            .expect("insert incoming");
+
+        let messages = db.get_sms_messages(10, 0, None).expect("list sms");
+        assert_eq!(
+            messages
+                .iter()
+                .map(|message| message.id)
+                .collect::<Vec<_>>(),
+            vec![second, first]
+        );
+
+        let conversation = db
+            .get_sms_conversation("10086", 10)
+            .expect("list conversation");
+        assert_eq!(
+            conversation
+                .iter()
+                .map(|message| message.id)
+                .collect::<Vec<_>>(),
+            vec![second, first]
+        );
+    }
+
+    #[test]
+    fn sms_transport_defaults_to_modem_and_can_mark_vowifi_ims() {
+        let db = test_database();
+
+        db.insert_sms("outgoing", "10086", "CHECK", "sent", None)
+            .expect("insert modem sms");
+        db.insert_sms_with_transport(
+            "incoming",
+            "10086",
+            "reply",
+            "received",
+            Some("vowifi-mt:test"),
+            "vowifi_ims",
+        )
+        .expect("insert vowifi sms");
+
+        let messages = db.get_sms_messages(10, 0, None).expect("list sms");
+        assert!(messages
+            .iter()
+            .any(|message| message.content == "CHECK" && message.transport == "modem"));
+        assert!(messages
+            .iter()
+            .any(|message| message.content == "reply" && message.transport == "vowifi_ims"));
+    }
+
+    #[test]
+    fn vowifi_restore_and_events_are_readable_when_empty_or_present() {
+        let db = test_database();
+
+        assert!(db
+            .get_vowifi_esim_restore()
+            .expect("empty restore")
+            .is_none());
+        assert_eq!(
+            db.get_vowifi_runtime_events(10, 0)
+                .expect("empty events")
+                .total,
+            0
+        );
+
+        db.upsert_vowifi_esim_restore(NewVowifiEsimRestore {
+            switch_token: Some("switch-redacted"),
+            switch_phase: Some("retry_scheduled"),
+            phase_ms: Some(1500),
+            identity_ready: true,
+            sim_auth_ready: false,
+            degraded_reason: Some("context_canceled"),
+            retry_count: 1,
+        })
+        .expect("write restore");
+        db.insert_vowifi_runtime_event(NewVowifiRuntimeEvent {
+            trace_id: Some("trace-redacted"),
+            level: "info",
+            phase: "profile_matched",
+            profile_id: Some("gb_ee_23433"),
+            event_type: "identity_refresh",
+            detail_json: r#"{"identity_ready":true}"#,
+        })
+        .expect("write event");
+
+        let restore = db
+            .get_vowifi_esim_restore()
+            .expect("read restore")
+            .expect("restore exists");
+        assert_eq!(restore.switch_phase.as_deref(), Some("retry_scheduled"));
+        assert_eq!(restore.retry_count, 1);
+
+        let events = db.get_vowifi_runtime_events(10, 0).expect("read events");
+        assert_eq!(events.total, 1);
+        assert_eq!(events.events[0].event_type, "identity_refresh");
+    }
+
+    #[test]
+    fn vowifi_runtime_events_filter_by_trace_and_redact_sensitive_detail() {
+        let db = test_database();
+
+        db.insert_vowifi_runtime_event(NewVowifiRuntimeEvent {
+            trace_id: Some("trace-a"),
+            level: "info",
+            phase: "identity_ready",
+            profile_id: Some("gb_ee_23433"),
+            event_type: "identity_refresh",
+            detail_json: r#"{"identity_ready":true}"#,
+        })
+        .expect("write event a");
+        db.insert_vowifi_runtime_event(NewVowifiRuntimeEvent {
+            trace_id: Some("trace-b"),
+            level: "warning",
+            phase: "sim_auth_gate",
+            profile_id: Some("gb_ee_23433"),
+            event_type: "sim_auth_retry",
+            detail_json: r#"{"imsi":"sample-redacted-value","token":"sample-redacted-value"}"#,
+        })
+        .expect("write event b");
+
+        let trace_a = db
+            .get_vowifi_runtime_events_filtered(10, 0, Some("trace-a"))
+            .expect("filter trace a");
+        assert_eq!(trace_a.total, 1);
+        assert_eq!(trace_a.events[0].trace_id.as_deref(), Some("trace-a"));
+        assert_eq!(trace_a.events[0].detail_json, r#"{"identity_ready":true}"#);
+
+        let trace_b = db
+            .get_vowifi_runtime_events_filtered(10, 0, Some("trace-b"))
+            .expect("filter trace b");
+        assert_eq!(trace_b.total, 1);
+        assert!(trace_b.events[0].detail_json.contains("redacted"));
+        assert!(!trace_b.events[0]
+            .detail_json
+            .contains("sample-redacted-value"));
+        assert!(!trace_b.events[0].detail_json.contains("secret"));
+    }
+
+    #[test]
+    fn vowifi_soak_runs_round_trip_with_counter_samples() {
+        let db = test_database();
+
+        assert_eq!(db.get_vowifi_soak_runs(10, 0).expect("empty soak").total, 0);
+
+        db.upsert_vowifi_soak_run(NewVowifiSoakRun {
+            run_id: "soak-1",
+            scenario_id: "rekey_dpd_nat_t_soak",
+            profile_id: Some("gb_ee_23433"),
+            plmn: Some("23433"),
+            status: "running",
+            duration_seconds: 60,
+            sample_count: 2,
+            failure_count: 0,
+            last_error: None,
+        })
+        .expect("write soak run");
+        db.insert_vowifi_soak_sample(NewVowifiSoakSample {
+            run_id: "soak-1",
+            sample_kind: "counter",
+            metric_name: "dpd_requests",
+            metric_value: 3,
+            state: "ok",
+        })
+        .expect("write sample");
+
+        let runs = db.get_vowifi_soak_runs(10, 0).expect("read soak runs");
+        assert_eq!(runs.total, 1);
+        assert!(runs.read_only);
+        assert_eq!(runs.runs[0].scenario_id, "rekey_dpd_nat_t_soak");
+        assert_eq!(runs.runs[0].samples.len(), 1);
+        assert_eq!(runs.runs[0].samples[0].metric_name, "dpd_requests");
+
+        let json = serde_json::to_string(&runs).expect("serialize soak runs");
+        let lower = json.to_ascii_lowercase();
+        for forbidden_key in [
+            "imsi",
+            "iccid",
+            "imei",
+            "eid",
+            "msisdn",
+            "phone_number",
+            "sms_body",
+            "key_material",
+            "authorization",
+            "password",
+            "token",
+        ] {
+            assert!(!lower.contains(&format!("\"{forbidden_key}\"")));
+        }
+    }
+}
+
+fn vowifi_runtime_event_from_row(row: &Row<'_>) -> Result<VowifiRuntimeEventEntry> {
+    let detail_json: String = row.get(6)?;
+    Ok(VowifiRuntimeEventEntry {
+        id: row.get(0)?,
+        trace_id: row.get(1)?,
+        level: row.get(2)?,
+        phase: row.get(3)?,
+        profile_id: row.get(4)?,
+        event_type: row.get(5)?,
+        detail_json: redact_vowifi_event_detail(&detail_json),
+        created_at: row.get(7)?,
+    })
+}
+
+fn redact_vowifi_event_detail(detail_json: &str) -> String {
+    const SENSITIVE_MARKERS: &[&str] = &[
+        "imsi",
+        "iccid",
+        "imei",
+        "eid",
+        "msisdn",
+        "phone_number",
+        "token",
+        "password",
+        "authorization",
+        "aka",
+        "key_material",
+        "spi",
+        "sms_body",
+        "content",
+    ];
+
+    let lower = detail_json.to_ascii_lowercase();
+    if SENSITIVE_MARKERS
+        .iter()
+        .any(|marker| lower.contains(marker))
+    {
+        r#"{"redacted":true,"policy":"vowifi_event_detail_sensitive_marker"}"#.to_string()
+    } else {
+        detail_json.to_string()
+    }
+}
+
+fn vowifi_soak_run_from_row(row: &Row<'_>) -> Result<VowifiSoakRunEntry> {
+    Ok(VowifiSoakRunEntry {
+        run_id: row.get(0)?,
+        scenario_id: row.get(1)?,
+        profile_id: row.get(2)?,
+        plmn: row.get(3)?,
+        status: row.get(4)?,
+        started_at: row.get(5)?,
+        finished_at: row.get(6)?,
+        duration_seconds: row.get(7)?,
+        sample_count: row.get(8)?,
+        failure_count: row.get(9)?,
+        last_error: row.get(10)?,
+        sensitive_values_policy: "counters_and_state_names_only_no_payload_or_secret_values"
+            .to_string(),
+        samples: Vec::new(),
+    })
+}
+
+fn vowifi_soak_sample_from_row(row: &Row<'_>) -> Result<VowifiSoakSampleEntry> {
+    Ok(VowifiSoakSampleEntry {
+        id: row.get(0)?,
+        run_id: row.get(1)?,
+        sample_kind: row.get(2)?,
+        metric_name: row.get(3)?,
+        metric_value: row.get(4)?,
+        state: row.get(5)?,
+        created_at: row.get(6)?,
+    })
+}
+
 fn notification_log_start_bound(value: &str) -> String {
     notification_log_date_bound(value, "00:00:00")
 }
@@ -325,6 +940,7 @@ fn sms_message_from_row(row: &Row<'_>) -> Result<SmsMessage> {
         timestamp: sms_timestamp_for_display(timestamp),
         status: row.get(5)?,
         pdu: row.get(6)?,
+        transport: row.get(7)?,
     })
 }
 
@@ -362,6 +978,13 @@ fn non_empty_option(value: Option<&str>) -> Option<String> {
         .map(ToString::to_string)
 }
 
+fn normalized_sms_transport(value: &str) -> &'static str {
+    match value.trim() {
+        "vowifi_ims" => "vowifi_ims",
+        _ => "modem",
+    }
+}
+
 fn table_has_column(conn: &Connection, table_name: &str, column_name: &str) -> Result<bool> {
     let mut stmt = conn.prepare(&format!("PRAGMA table_info({table_name})"))?;
     let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
@@ -391,6 +1014,7 @@ impl Database {
                 status TEXT NOT NULL,
                 notification_status TEXT NOT NULL DEFAULT 'pending',
                 pdu TEXT,
+                transport TEXT NOT NULL DEFAULT 'modem',
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )",
             [],
@@ -400,6 +1024,13 @@ impl Database {
             conn.execute(
                 "ALTER TABLE sms_messages
                  ADD COLUMN notification_status TEXT NOT NULL DEFAULT 'pending'",
+                [],
+            )?;
+        }
+        if !table_has_column(&conn, "sms_messages", "transport")? {
+            conn.execute(
+                "ALTER TABLE sms_messages
+                 ADD COLUMN transport TEXT NOT NULL DEFAULT 'modem'",
                 [],
             )?;
         }
@@ -417,6 +1048,10 @@ impl Database {
 
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_sms_notification_status ON sms_messages(notification_status)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sms_transport ON sms_messages(transport)",
             [],
         )?;
         normalize_existing_sms_timestamps(&conn)?;
@@ -644,6 +1279,155 @@ impl Database {
             [],
         )?;
 
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS vowifi_runtime_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trace_id TEXT,
+                level TEXT NOT NULL,
+                phase TEXT NOT NULL,
+                profile_id TEXT,
+                event_type TEXT NOT NULL,
+                detail_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_vowifi_runtime_events_created_at
+             ON vowifi_runtime_events(created_at DESC, id DESC)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_vowifi_runtime_events_trace
+             ON vowifi_runtime_events(trace_id, id DESC)",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS vowifi_runtime_snapshots (
+                singleton_key INTEGER PRIMARY KEY CHECK (singleton_key = 1),
+                phase TEXT NOT NULL,
+                profile_id TEXT,
+                plmn TEXT,
+                identity_ready INTEGER NOT NULL,
+                sim_auth_ready INTEGER NOT NULL,
+                profile_matched INTEGER NOT NULL,
+                epdg_ready INTEGER NOT NULL,
+                ike_ready INTEGER NOT NULL,
+                child_sa_ready INTEGER NOT NULL,
+                esp_ready INTEGER NOT NULL,
+                ims_registered INTEGER NOT NULL,
+                sms_ready INTEGER NOT NULL,
+                degraded_reason TEXT,
+                updated_at TEXT NOT NULL
+            )",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS vowifi_sms_delivery (
+                message_id TEXT PRIMARY KEY,
+                trace_id TEXT NOT NULL,
+                direction TEXT NOT NULL,
+                state TEXT NOT NULL,
+                sip_state TEXT NOT NULL,
+                rpdu_ack TEXT NOT NULL,
+                delivery_reported INTEGER NOT NULL,
+                failure_cause TEXT,
+                retry_count INTEGER NOT NULL DEFAULT 0,
+                api_sms_id INTEGER,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(api_sms_id) REFERENCES sms_messages(id) ON DELETE SET NULL
+            )",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_vowifi_sms_delivery_trace
+             ON vowifi_sms_delivery(trace_id)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_vowifi_sms_delivery_updated
+             ON vowifi_sms_delivery(updated_at DESC)",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS vowifi_sms_parts (
+                message_id TEXT NOT NULL,
+                reference INTEGER NOT NULL,
+                sequence INTEGER NOT NULL,
+                total INTEGER NOT NULL,
+                received INTEGER NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(message_id, reference, sequence),
+                FOREIGN KEY(message_id) REFERENCES vowifi_sms_delivery(message_id)
+            )",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS vowifi_esim_restore (
+                singleton_key INTEGER PRIMARY KEY CHECK (singleton_key = 1),
+                switch_token TEXT,
+                switch_phase TEXT,
+                phase_ms INTEGER,
+                identity_ready INTEGER NOT NULL,
+                sim_auth_ready INTEGER NOT NULL,
+                degraded_reason TEXT,
+                retry_count INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL
+            )",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS vowifi_soak_runs (
+                run_id TEXT PRIMARY KEY,
+                scenario_id TEXT NOT NULL,
+                profile_id TEXT,
+                plmn TEXT,
+                status TEXT NOT NULL,
+                started_at TEXT NOT NULL,
+                finished_at TEXT,
+                duration_seconds INTEGER NOT NULL DEFAULT 0,
+                sample_count INTEGER NOT NULL DEFAULT 0,
+                failure_count INTEGER NOT NULL DEFAULT 0,
+                last_error TEXT
+            )",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_vowifi_soak_runs_started
+             ON vowifi_soak_runs(started_at DESC, run_id DESC)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_vowifi_soak_runs_scenario
+             ON vowifi_soak_runs(scenario_id, started_at DESC)",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS vowifi_soak_samples (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id TEXT NOT NULL,
+                sample_kind TEXT NOT NULL,
+                metric_name TEXT NOT NULL,
+                metric_value INTEGER NOT NULL,
+                state TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(run_id) REFERENCES vowifi_soak_runs(run_id)
+            )",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_vowifi_soak_samples_run
+             ON vowifi_soak_samples(run_id, id DESC)",
+            [],
+        )?;
+
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
@@ -761,6 +1545,518 @@ impl Database {
     // ==================== 短信相关方法 ====================
 
     /// 插入新短信
+    pub fn insert_vowifi_runtime_event(&self, event: NewVowifiRuntimeEvent<'_>) -> Result<i64> {
+        let conn = self.conn.lock().unwrap();
+        let created_at = beijing_sms_now_string();
+        conn.execute(
+            "INSERT INTO vowifi_runtime_events (
+                trace_id, level, phase, profile_id, event_type, detail_json, created_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                event.trace_id,
+                event.level,
+                event.phase,
+                event.profile_id,
+                event.event_type,
+                event.detail_json,
+                created_at,
+            ],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    pub fn clear_vowifi_runtime_events(&self) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM vowifi_runtime_events", [])?;
+        Ok(())
+    }
+
+    pub fn get_vowifi_runtime_events(
+        &self,
+        limit: i64,
+        offset: i64,
+    ) -> Result<VowifiRuntimeEventsResponse> {
+        self.get_vowifi_runtime_events_filtered(limit, offset, None)
+    }
+
+    pub fn get_vowifi_runtime_events_filtered(
+        &self,
+        limit: i64,
+        offset: i64,
+        trace_id: Option<&str>,
+    ) -> Result<VowifiRuntimeEventsResponse> {
+        let conn = self.conn.lock().unwrap();
+        let limit = limit.clamp(1, 200);
+        let offset = offset.max(0);
+        let trace_id = trace_id.map(str::trim).filter(|value| !value.is_empty());
+
+        let total = match trace_id {
+            Some(trace_id) => conn.query_row(
+                "SELECT COUNT(*) FROM vowifi_runtime_events WHERE trace_id = ?1",
+                params![trace_id],
+                |row| row.get(0),
+            )?,
+            None => conn.query_row("SELECT COUNT(*) FROM vowifi_runtime_events", [], |row| {
+                row.get(0)
+            })?,
+        };
+
+        let mut events = Vec::new();
+        if let Some(trace_id) = trace_id {
+            let mut stmt = conn.prepare(
+                "SELECT id, trace_id, level, phase, profile_id, event_type, detail_json, created_at
+                 FROM vowifi_runtime_events
+                 WHERE trace_id = ?1
+                 ORDER BY id DESC
+                 LIMIT ?2 OFFSET ?3",
+            )?;
+            let rows = stmt.query_map(
+                params![trace_id, limit, offset],
+                vowifi_runtime_event_from_row,
+            )?;
+            for row in rows {
+                events.push(row?);
+            }
+        } else {
+            let mut stmt = conn.prepare(
+                "SELECT id, trace_id, level, phase, profile_id, event_type, detail_json, created_at
+                 FROM vowifi_runtime_events
+                 ORDER BY id DESC
+                 LIMIT ?1 OFFSET ?2",
+            )?;
+            let rows = stmt.query_map(params![limit, offset], vowifi_runtime_event_from_row)?;
+            for row in rows {
+                events.push(row?);
+            }
+        }
+
+        Ok(VowifiRuntimeEventsResponse { events, total })
+    }
+
+    pub fn upsert_vowifi_runtime_snapshot(
+        &self,
+        snapshot: NewVowifiRuntimeSnapshot<'_>,
+    ) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let updated_at = beijing_sms_now_string();
+        conn.execute(
+            "INSERT INTO vowifi_runtime_snapshots (
+                singleton_key, phase, profile_id, plmn,
+                identity_ready, sim_auth_ready, profile_matched,
+                epdg_ready, ike_ready, child_sa_ready, esp_ready,
+                ims_registered, sms_ready, degraded_reason, updated_at
+             ) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+             ON CONFLICT(singleton_key) DO UPDATE SET
+                phase = excluded.phase,
+                profile_id = excluded.profile_id,
+                plmn = excluded.plmn,
+                identity_ready = excluded.identity_ready,
+                sim_auth_ready = excluded.sim_auth_ready,
+                profile_matched = excluded.profile_matched,
+                epdg_ready = excluded.epdg_ready,
+                ike_ready = excluded.ike_ready,
+                child_sa_ready = excluded.child_sa_ready,
+                esp_ready = excluded.esp_ready,
+                ims_registered = excluded.ims_registered,
+                sms_ready = excluded.sms_ready,
+                degraded_reason = excluded.degraded_reason,
+                updated_at = excluded.updated_at",
+            params![
+                snapshot.phase,
+                snapshot.profile_id,
+                snapshot.plmn,
+                snapshot.identity_ready,
+                snapshot.sim_auth_ready,
+                snapshot.profile_matched,
+                snapshot.epdg_ready,
+                snapshot.ike_ready,
+                snapshot.child_sa_ready,
+                snapshot.esp_ready,
+                snapshot.ims_registered,
+                snapshot.sms_ready,
+                snapshot.degraded_reason,
+                updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_vowifi_runtime_snapshot(&self) -> Result<Option<VowifiRuntimeSnapshotEntry>> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT phase, profile_id, plmn,
+                    identity_ready, sim_auth_ready, profile_matched,
+                    epdg_ready, ike_ready, child_sa_ready, esp_ready,
+                    ims_registered, sms_ready, degraded_reason, updated_at
+             FROM vowifi_runtime_snapshots
+             WHERE singleton_key = 1",
+            [],
+            |row| {
+                Ok(VowifiRuntimeSnapshotEntry {
+                    phase: row.get(0)?,
+                    profile_id: row.get(1)?,
+                    plmn: row.get(2)?,
+                    identity_ready: row.get::<_, i64>(3)? != 0,
+                    sim_auth_ready: row.get::<_, i64>(4)? != 0,
+                    profile_matched: row.get::<_, i64>(5)? != 0,
+                    epdg_ready: row.get::<_, i64>(6)? != 0,
+                    ike_ready: row.get::<_, i64>(7)? != 0,
+                    child_sa_ready: row.get::<_, i64>(8)? != 0,
+                    esp_ready: row.get::<_, i64>(9)? != 0,
+                    ims_registered: row.get::<_, i64>(10)? != 0,
+                    sms_ready: row.get::<_, i64>(11)? != 0,
+                    degraded_reason: row.get(12)?,
+                    updated_at: row.get(13)?,
+                })
+            },
+        )
+        .optional()
+    }
+
+    pub fn upsert_vowifi_sms_delivery(&self, delivery: NewVowifiSmsDelivery<'_>) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let now = beijing_sms_now_string();
+        conn.execute(
+            "INSERT INTO vowifi_sms_delivery (
+                message_id, trace_id, direction, state, sip_state, rpdu_ack,
+                delivery_reported, failure_cause, retry_count, api_sms_id,
+                created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11)
+             ON CONFLICT(message_id) DO UPDATE SET
+                trace_id = excluded.trace_id,
+                direction = excluded.direction,
+                state = excluded.state,
+                sip_state = excluded.sip_state,
+                rpdu_ack = excluded.rpdu_ack,
+                delivery_reported = excluded.delivery_reported,
+                failure_cause = excluded.failure_cause,
+                retry_count = excluded.retry_count,
+                api_sms_id = excluded.api_sms_id,
+                updated_at = excluded.updated_at",
+            params![
+                delivery.message_id,
+                delivery.trace_id,
+                delivery.direction,
+                delivery.state,
+                delivery.sip_state,
+                delivery.rpdu_ack,
+                delivery.delivery_reported,
+                delivery.failure_cause,
+                delivery.retry_count,
+                delivery.api_sms_id,
+                now,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn upsert_vowifi_sms_part(&self, part: NewVowifiSmsPart<'_>) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let updated_at = beijing_sms_now_string();
+        conn.execute(
+            "INSERT INTO vowifi_sms_parts (
+                message_id, reference, sequence, total, received, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(message_id, reference, sequence) DO UPDATE SET
+                total = excluded.total,
+                received = excluded.received,
+                updated_at = excluded.updated_at",
+            params![
+                part.message_id,
+                part.reference,
+                part.sequence,
+                part.total,
+                part.received,
+                updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_vowifi_sms_deliveries(
+        &self,
+        limit: i64,
+        offset: i64,
+    ) -> Result<VowifiSmsDeliveriesResponse> {
+        let conn = self.conn.lock().unwrap();
+        let limit = limit.clamp(1, 200);
+        let offset = offset.max(0);
+
+        let total = conn.query_row("SELECT COUNT(*) FROM vowifi_sms_delivery", [], |row| {
+            row.get(0)
+        })?;
+        let mut stmt = conn.prepare(
+            "SELECT message_id, trace_id, direction, state, sip_state, rpdu_ack,
+                    delivery_reported, failure_cause, retry_count, api_sms_id,
+                    created_at, updated_at
+             FROM vowifi_sms_delivery
+             ORDER BY updated_at DESC, message_id DESC
+             LIMIT ?1 OFFSET ?2",
+        )?;
+        let rows = stmt.query_map(params![limit, offset], |row| {
+            Ok(VowifiSmsDeliveryEntry {
+                message_id: row.get(0)?,
+                trace_id: row.get(1)?,
+                direction: row.get(2)?,
+                state: row.get(3)?,
+                sip_state: row.get(4)?,
+                rpdu_ack: row.get(5)?,
+                delivery_reported: row.get::<_, i64>(6)? != 0,
+                failure_cause: row.get(7)?,
+                retry_count: row.get(8)?,
+                api_sms_id: row.get(9)?,
+                parts: Vec::new(),
+                created_at: row.get(10)?,
+                updated_at: row.get(11)?,
+            })
+        })?;
+
+        let mut deliveries = Vec::new();
+        for row in rows {
+            deliveries.push(row?);
+        }
+        drop(stmt);
+
+        for delivery in &mut deliveries {
+            delivery.parts = Self::vowifi_sms_parts_for_conn(&conn, &delivery.message_id)?;
+        }
+
+        Ok(VowifiSmsDeliveriesResponse { deliveries, total })
+    }
+
+    pub fn get_vowifi_sms_delivery(
+        &self,
+        message_id: &str,
+    ) -> Result<Option<VowifiSmsDeliveryEntry>> {
+        let conn = self.conn.lock().unwrap();
+        let mut delivery = conn
+            .query_row(
+                "SELECT message_id, trace_id, direction, state, sip_state, rpdu_ack,
+                        delivery_reported, failure_cause, retry_count, api_sms_id,
+                        created_at, updated_at
+                 FROM vowifi_sms_delivery
+                 WHERE message_id = ?1",
+                params![message_id],
+                |row| {
+                    Ok(VowifiSmsDeliveryEntry {
+                        message_id: row.get(0)?,
+                        trace_id: row.get(1)?,
+                        direction: row.get(2)?,
+                        state: row.get(3)?,
+                        sip_state: row.get(4)?,
+                        rpdu_ack: row.get(5)?,
+                        delivery_reported: row.get::<_, i64>(6)? != 0,
+                        failure_cause: row.get(7)?,
+                        retry_count: row.get(8)?,
+                        api_sms_id: row.get(9)?,
+                        parts: Vec::new(),
+                        created_at: row.get(10)?,
+                        updated_at: row.get(11)?,
+                    })
+                },
+            )
+            .optional()?;
+
+        if let Some(delivery) = delivery.as_mut() {
+            delivery.parts = Self::vowifi_sms_parts_for_conn(&conn, &delivery.message_id)?;
+        }
+
+        Ok(delivery)
+    }
+
+    fn vowifi_sms_parts_for_conn(
+        conn: &Connection,
+        message_id: &str,
+    ) -> Result<Vec<VowifiSmsPartEntry>> {
+        let mut stmt = conn.prepare(
+            "SELECT message_id, reference, sequence, total, received, updated_at
+             FROM vowifi_sms_parts
+             WHERE message_id = ?1
+             ORDER BY reference ASC, sequence ASC",
+        )?;
+        let rows = stmt.query_map(params![message_id], |row| {
+            Ok(VowifiSmsPartEntry {
+                message_id: row.get(0)?,
+                reference: row.get(1)?,
+                sequence: row.get(2)?,
+                total: row.get(3)?,
+                received: row.get::<_, i64>(4)? != 0,
+                updated_at: row.get(5)?,
+            })
+        })?;
+
+        let mut parts = Vec::new();
+        for row in rows {
+            parts.push(row?);
+        }
+        Ok(parts)
+    }
+
+    pub fn upsert_vowifi_esim_restore(&self, restore: NewVowifiEsimRestore<'_>) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let updated_at = beijing_sms_now_string();
+        conn.execute(
+            "INSERT INTO vowifi_esim_restore (
+                singleton_key, switch_token, switch_phase, phase_ms,
+                identity_ready, sim_auth_ready, degraded_reason, retry_count, updated_at
+             ) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             ON CONFLICT(singleton_key) DO UPDATE SET
+                switch_token = excluded.switch_token,
+                switch_phase = excluded.switch_phase,
+                phase_ms = excluded.phase_ms,
+                identity_ready = excluded.identity_ready,
+                sim_auth_ready = excluded.sim_auth_ready,
+                degraded_reason = excluded.degraded_reason,
+                retry_count = excluded.retry_count,
+                updated_at = excluded.updated_at",
+            params![
+                restore.switch_token,
+                restore.switch_phase,
+                restore.phase_ms,
+                restore.identity_ready,
+                restore.sim_auth_ready,
+                restore.degraded_reason,
+                restore.retry_count,
+                updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_vowifi_esim_restore(&self) -> Result<Option<VowifiEsimRestoreEntry>> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT switch_token, switch_phase, phase_ms,
+                    identity_ready, sim_auth_ready, degraded_reason, retry_count, updated_at
+             FROM vowifi_esim_restore
+             WHERE singleton_key = 1",
+            [],
+            |row| {
+                Ok(VowifiEsimRestoreEntry {
+                    switch_token: row.get(0)?,
+                    switch_phase: row.get(1)?,
+                    phase_ms: row.get(2)?,
+                    identity_ready: row.get::<_, i64>(3)? != 0,
+                    sim_auth_ready: row.get::<_, i64>(4)? != 0,
+                    degraded_reason: row.get(5)?,
+                    retry_count: row.get(6)?,
+                    updated_at: row.get(7)?,
+                })
+            },
+        )
+        .optional()
+    }
+
+    pub fn upsert_vowifi_soak_run(&self, run: NewVowifiSoakRun<'_>) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let now = beijing_sms_now_string();
+        let finished_at =
+            matches!(run.status, "passed" | "failed" | "aborted").then_some(now.as_str());
+        conn.execute(
+            "INSERT INTO vowifi_soak_runs (
+                run_id, scenario_id, profile_id, plmn, status, started_at, finished_at,
+                duration_seconds, sample_count, failure_count, last_error
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+             ON CONFLICT(run_id) DO UPDATE SET
+                scenario_id = excluded.scenario_id,
+                profile_id = excluded.profile_id,
+                plmn = excluded.plmn,
+                status = excluded.status,
+                finished_at = excluded.finished_at,
+                duration_seconds = excluded.duration_seconds,
+                sample_count = excluded.sample_count,
+                failure_count = excluded.failure_count,
+                last_error = excluded.last_error",
+            params![
+                run.run_id,
+                run.scenario_id,
+                run.profile_id,
+                run.plmn,
+                run.status,
+                now,
+                finished_at,
+                run.duration_seconds,
+                run.sample_count,
+                run.failure_count,
+                run.last_error,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn insert_vowifi_soak_sample(&self, sample: NewVowifiSoakSample<'_>) -> Result<i64> {
+        let conn = self.conn.lock().unwrap();
+        let created_at = beijing_sms_now_string();
+        conn.execute(
+            "INSERT INTO vowifi_soak_samples (
+                run_id, sample_kind, metric_name, metric_value, state, created_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                sample.run_id,
+                sample.sample_kind,
+                sample.metric_name,
+                sample.metric_value,
+                sample.state,
+                created_at,
+            ],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    pub fn get_vowifi_soak_runs(&self, limit: i64, offset: i64) -> Result<VowifiSoakRunsResponse> {
+        let conn = self.conn.lock().unwrap();
+        let limit = limit.clamp(1, 100);
+        let offset = offset.max(0);
+
+        let total = conn.query_row("SELECT COUNT(*) FROM vowifi_soak_runs", [], |row| {
+            row.get(0)
+        })?;
+        let mut stmt = conn.prepare(
+            "SELECT run_id, scenario_id, profile_id, plmn, status, started_at, finished_at,
+                    duration_seconds, sample_count, failure_count, last_error
+             FROM vowifi_soak_runs
+             ORDER BY started_at DESC, run_id DESC
+             LIMIT ?1 OFFSET ?2",
+        )?;
+        let rows = stmt.query_map(params![limit, offset], vowifi_soak_run_from_row)?;
+
+        let mut runs = Vec::new();
+        for row in rows {
+            runs.push(row?);
+        }
+        drop(stmt);
+
+        for run in &mut runs {
+            run.samples = Self::vowifi_soak_samples_for_conn(&conn, &run.run_id)?;
+        }
+
+        Ok(VowifiSoakRunsResponse {
+            runs,
+            total,
+            read_only: true,
+        })
+    }
+
+    fn vowifi_soak_samples_for_conn(
+        conn: &Connection,
+        run_id: &str,
+    ) -> Result<Vec<VowifiSoakSampleEntry>> {
+        let mut stmt = conn.prepare(
+            "SELECT id, run_id, sample_kind, metric_name, metric_value, state, created_at
+             FROM vowifi_soak_samples
+             WHERE run_id = ?1
+             ORDER BY id DESC
+             LIMIT 50",
+        )?;
+        let rows = stmt.query_map(params![run_id], vowifi_soak_sample_from_row)?;
+
+        let mut samples = Vec::new();
+        for row in rows {
+            samples.push(row?);
+        }
+        Ok(samples)
+    }
+
     pub fn insert_sms(
         &self,
         direction: &str,
@@ -773,6 +2069,27 @@ impl Database {
         self.insert_sms_at(direction, phone_number, content, &timestamp, status, pdu)
     }
 
+    pub fn insert_sms_with_transport(
+        &self,
+        direction: &str,
+        phone_number: &str,
+        content: &str,
+        status: &str,
+        pdu: Option<&str>,
+        transport: &str,
+    ) -> Result<i64> {
+        let timestamp = beijing_sms_now_string();
+        self.insert_sms_at_with_transport(
+            direction,
+            phone_number,
+            content,
+            &timestamp,
+            status,
+            pdu,
+            transport,
+        )
+    }
+
     pub fn insert_sms_at(
         &self,
         direction: &str,
@@ -782,12 +2099,42 @@ impl Database {
         status: &str,
         pdu: Option<&str>,
     ) -> Result<i64> {
+        self.insert_sms_at_with_transport(
+            direction,
+            phone_number,
+            content,
+            timestamp,
+            status,
+            pdu,
+            "modem",
+        )
+    }
+
+    pub fn insert_sms_at_with_transport(
+        &self,
+        direction: &str,
+        phone_number: &str,
+        content: &str,
+        timestamp: &str,
+        status: &str,
+        pdu: Option<&str>,
+        transport: &str,
+    ) -> Result<i64> {
         let conn = self.conn.lock().unwrap();
         let timestamp = sms_timestamp_for_storage(timestamp);
+        let transport = normalized_sms_transport(transport);
         conn.execute(
-            "INSERT INTO sms_messages (direction, phone_number, content, timestamp, status, pdu)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![direction, phone_number, content, timestamp, status, pdu],
+            "INSERT INTO sms_messages (direction, phone_number, content, timestamp, status, pdu, transport)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                direction,
+                phone_number,
+                content,
+                timestamp,
+                status,
+                pdu,
+                transport
+            ],
         )?;
 
         Ok(conn.last_insert_rowid())
@@ -802,6 +2149,16 @@ impl Database {
             |row| row.get(0),
         )?;
         Ok(count > 0)
+    }
+
+    pub fn sms_id_by_pdu(&self, pdu: &str) -> Result<Option<i64>> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT id FROM sms_messages WHERE pdu = ?1 ORDER BY id DESC LIMIT 1",
+            params![pdu],
+            |row| row.get(0),
+        )
+        .optional()
     }
 
     pub fn incoming_sms_exists_by_timestamp(
@@ -854,7 +2211,7 @@ impl Database {
         match direction {
             Some(direction) => {
                 let mut stmt = conn.prepare(
-                    "SELECT id, direction, phone_number, content, timestamp, status, pdu
+                    "SELECT id, direction, phone_number, content, timestamp, status, pdu, transport
                      FROM sms_messages
                      WHERE direction = ?1
                      ORDER BY timestamp DESC, id DESC
@@ -873,7 +2230,7 @@ impl Database {
             }
             None => {
                 let mut stmt = conn.prepare(
-                    "SELECT id, direction, phone_number, content, timestamp, status, pdu
+                    "SELECT id, direction, phone_number, content, timestamp, status, pdu, transport
                      FROM sms_messages
                      ORDER BY timestamp DESC, id DESC
                      LIMIT ?1 OFFSET ?2",
@@ -895,7 +2252,7 @@ impl Database {
     pub fn get_sms_conversation(&self, phone_number: &str, limit: i64) -> Result<Vec<SmsMessage>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, direction, phone_number, content, timestamp, status, pdu
+            "SELECT id, direction, phone_number, content, timestamp, status, pdu, transport
              FROM sms_messages
              WHERE phone_number = ?1
              ORDER BY timestamp DESC, id DESC
@@ -1463,6 +2820,7 @@ impl Database {
     /// 删除所有短信
     pub fn clear_all_sms(&self) -> Result<()> {
         let conn = self.conn.lock().unwrap();
+        conn.execute("UPDATE vowifi_sms_delivery SET api_sms_id = NULL", [])?;
         conn.execute("DELETE FROM sms_messages", [])?;
         Ok(())
     }
@@ -1470,12 +2828,24 @@ impl Database {
     /// 删除单条短信
     pub fn delete_sms(&self, id: i64) -> Result<usize> {
         let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE vowifi_sms_delivery SET api_sms_id = NULL WHERE api_sms_id = ?1",
+            params![id],
+        )?;
         conn.execute("DELETE FROM sms_messages WHERE id = ?1", params![id])
     }
 
     /// 删除一个对话的所有短信
     pub fn delete_sms_conversation(&self, phone_number: &str) -> Result<usize> {
         let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE vowifi_sms_delivery
+             SET api_sms_id = NULL
+             WHERE api_sms_id IN (
+                 SELECT id FROM sms_messages WHERE phone_number = ?1
+             )",
+            params![phone_number],
+        )?;
         conn.execute(
             "DELETE FROM sms_messages WHERE phone_number = ?1",
             params![phone_number],
@@ -1489,6 +2859,14 @@ impl Database {
         let mut deleted = 0usize;
 
         for phone_number in phone_numbers {
+            tx.execute(
+                "UPDATE vowifi_sms_delivery
+                 SET api_sms_id = NULL
+                 WHERE api_sms_id IN (
+                     SELECT id FROM sms_messages WHERE phone_number = ?1
+                 )",
+                params![phone_number],
+            )?;
             deleted += tx.execute(
                 "DELETE FROM sms_messages WHERE phone_number = ?1",
                 params![phone_number],
@@ -1496,6 +2874,10 @@ impl Database {
         }
 
         for id in ids {
+            tx.execute(
+                "UPDATE vowifi_sms_delivery SET api_sms_id = NULL WHERE api_sms_id = ?1",
+                params![id],
+            )?;
             deleted += tx.execute("DELETE FROM sms_messages WHERE id = ?1", params![id])?;
         }
 

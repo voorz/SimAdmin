@@ -34,6 +34,7 @@ import { api } from '../api/current'
 import type { SimInfo } from '../api/types'
 import ErrorSnackbar from '../components/ErrorSnackbar'
 import EsimManagerPage from './EsimManager'
+import VowifiDiagnosticsPage from './VowifiDiagnostics'
 import { useWorkMode } from '../contexts/WorkModeContext'
 
 function getSensitiveStyle(show: boolean) {
@@ -603,9 +604,37 @@ function SimBasicInfo() {
 export default function SimCardPage() {
   const { mode, loading } = useWorkMode()
   const [searchParams, setSearchParams] = useSearchParams()
+  const [vowifiEnabled, setVowifiEnabled] = useState(false)
+  const [configLoading, setConfigLoading] = useState(true)
+
+  useEffect(() => {
+    let active = true
+    api.getVowifiControl()
+      .then((res) => {
+        if (active && res.data) {
+          setVowifiEnabled(res.data.feature_enabled)
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to load VoWiFi control config:', err)
+      })
+      .finally(() => {
+        if (active) {
+          setConfigLoading(false)
+        }
+      })
+    return () => {
+      active = false
+    }
+  }, [])
+
   let activeTab = searchParams.get('tab') || 'basic'
 
   if (mode !== 'esim' && activeTab === 'esim') {
+    activeTab = 'basic'
+  }
+
+  if (!configLoading && !vowifiEnabled && activeTab === 'vowifi') {
     activeTab = 'basic'
   }
 
@@ -619,7 +648,7 @@ export default function SimCardPage() {
     setSearchParams(params)
   }
 
-  if (loading) {
+  if (loading || configLoading) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" minHeight="50vh">
         <CircularProgress size={32} />
@@ -639,12 +668,14 @@ export default function SimCardPage() {
         <Tabs value={activeTab} onChange={handleTabChange} variant="scrollable" scrollButtons="auto">
           <Tab label="基本信息" value="basic" />
           {mode === 'esim' && <Tab label="eSIM 管理" value="esim" sx={{ textTransform: 'none' }} />}
+          {vowifiEnabled && <Tab label="WiFi Calling" value="vowifi" sx={{ textTransform: 'none' }} />}
         </Tabs>
       </Box>
 
       <Box sx={{ mt: 2 }}>
         {activeTab === 'basic' && <SimBasicInfo />}
         {activeTab === 'esim' && mode === 'esim' && <EsimManagerPage />}
+        {activeTab === 'vowifi' && vowifiEnabled && <VowifiDiagnosticsPage />}
       </Box>
     </Box>
   )
