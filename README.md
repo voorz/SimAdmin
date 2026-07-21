@@ -1,9 +1,7 @@
-<a href="https://github.com/voorz/SimAdmin">
-  <img src="https://socialify.git.ci/voorz/SimAdmin/image?description=1&descriptionEditable=Web-based%20SIM%2FeSIM%20management%20system%20for%20Linux%20cellular%20devices&font=Source%20Code%20Pro&name=1&owner=1&pattern=Floating%20Cogs&theme=Auto" alt="SimAdmin" />
-</a>
-
 <div align="center">
   <br/>
+
+  <p>Web-based SIM/eSIM management system for Linux cellular CPEs, portable Wi-Fi hotspots, and software routers. Comprehensive control over SIM/eSIM cards, cellular networks, SMS, DDNS, device status, and OTA updates.</p>
 
   <div>
     <a href="https://github.com/voorz/SimAdmin">
@@ -34,13 +32,9 @@
     </a>
   </div>
 
-  <br/>
-
 </div>
 
-# SimAdmin - SIM/eSIM Hub
-
-SimAdmin is a web-based management system for Linux-based cellular CPEs, portable Wi-Fi hotspots, and software routers. It provides comprehensive control over SIM/eSIM cards, cellular networks, SMS, DDNS, device status, and OTA updates.
+## Overview
 
 **Key Highlight — VoWiFi (WiFi Calling) Support**: Native IKEv2/IPsec implementation with zero external dependencies. Uses SIM hardware authentication to establish encrypted tunnels, enabling IMS registration and secure SMS even without cellular signal or in airplane mode.
 
@@ -51,6 +45,16 @@ The project consists of a Rust backend and a React frontend:
 - **Deployment**: The backend binary serves the frontend SPA in-process. Installed to `/opt/simadmin`, managed by systemd.
 
 Health checks are designed for Linux cellular devices with ModemManager support. Different modem firmware, kernels, and ModemManager versions expose different capabilities — actual features depend on your hardware.
+
+## Documentation
+
+- **[Installation & Deployment](./docs/install.md)** — One-click install/uninstall, default access address, and initial admin password setup.
+- **[Changelog](./docs/changelog.md)** — Detailed version history and update notes.
+- **[Environment & System Management](./docs/environment.md)** — Hardware requirements, dependencies, install paths, eSIM management, systemd service, and data persistence.
+- **[Developer Guide](./docs/developer.md)** — Project structure, frontend/backend development, OTA build, ADB deployment, and D-Bus interface reference.
+- **[REST API Documentation](./bruno-api/README.md)** — REST API route map, request/response schemas, and Bruno API debugging collections.
+
+## Architecture
 
 ### System Requirements
 
@@ -64,27 +68,6 @@ Health checks are designed for Linux cellular devices with ModemManager support.
 > SimAdmin communicates with modems through ModemManager's D-Bus API, not via direct AT commands.
 > This is why Debian/Ubuntu (which ship these services by default) are the primary targets.
 > Distributions without these services (e.g. OpenWrt, Alpine) require significant adaptation.
-
-**Why not Docker?**
-
-SimAdmin requires real-time access to system D-Bus, modem hardware (`/dev/ttyUSB*`), and NetworkManager. Containerizing introduces unnecessary complexity:
-
-- D-Bus socket passthrough (`/var/run/dbus` mount)
-- Device file passthrough (`/dev` mount)
-- Potential conflicts between container and host NetworkManager
-- Loss of systemd service management benefits
-
-For production, direct deployment on Debian/Ubuntu is the recommended approach.
-
-## Documentation
-
-- 🚀 **[Installation & Deployment](./docs/install.md)** — One-click install/uninstall, default access address, and initial admin password setup.
-- 📜 **[Changelog](./docs/changelog.md)** — Detailed version history and update notes.
-- ⚙️ **[Environment & System Management](./docs/environment.md)** — Hardware requirements, dependencies, install paths, eSIM management, systemd service, and data persistence.
-- 🛠️ **[Developer Guide](./docs/developer.md)** — Project structure, frontend/backend development, OTA build, ADB deployment, and D-Bus interface reference.
-- 🔌 **[REST API Documentation](./bruno-api/README.md)** — REST API route map, request/response schemas, and Bruno API debugging collections.
-
-## Architecture
 
 ```mermaid
 graph TB
