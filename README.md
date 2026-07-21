@@ -4,8 +4,8 @@
   <div>
     <a href="https://github.com/voorz/SimAdmin">
       <img
-        alt="Debian"
-        src="https://img.shields.io/badge/Debian-%23D70A53?logo=debian&logoColor=white&style=flat-square"
+        alt="Linux"
+        src="https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black&style=flat-square"
       />
     </a>
     <a href="./LICENSE">
@@ -35,13 +35,30 @@
 
 # SimAdmin
 
-SimAdmin is a web-based management system for Debian-based cellular CPEs, portable Wi-Fi hotspots, and software routers. It provides comprehensive control over SIM/eSIM cards, cellular networks, SMS, DDNS, device status, and OTA updates.
+SimAdmin is a web-based management system for Linux-based cellular CPEs, portable Wi-Fi hotspots, and software routers. It provides comprehensive control over SIM/eSIM cards, cellular networks, SMS, DDNS, device status, and OTA updates.
+
+The project targets any Linux distribution with systemd, D-Bus, ModemManager, and NetworkManager (e.g. Debian, Ubuntu, OpenWrt, etc.).
 
 The project consists of a Rust backend and a React frontend:
 
-- **Backend**: Rust + Axum + zbus, communicates with ModemManager via D-Bus, with fallbacks to `mmcli` and direct AT commands.
-- **Frontend**: React + Vite + Material UI, providing a dashboard, SIM management, cellular network, SMS, notification center, automation, and OTA update pages.
-- **Deployment**: The backend binary serves the frontend SPA in-process. Installed to `/opt/simadmin`, managed by systemd.
+### Development
+
+| Component | Tech Stack | Dev Server |
+|-----------|-----------|------------|
+| Backend | Rust + Axum + zbus | `cargo run -- --host :: --port 3000` |
+| Frontend | React + Vite + MUI | `pnpm dev` (port 5173, proxies `/api` to `:3000`) |
+
+- Backend communicates with ModemManager via system D-Bus. On dev machines without modem hardware, API calls will return errors — this is expected.
+- Frontend dev server proxies `/api/*` requests to the backend. Update `target` in `vite.config.ts` if the backend runs on a different host.
+- Build the full OTA package via GitHub Actions: push a `v*` tag to trigger the build workflow, which cross-compiles to `aarch64-unknown-linux-musl` and publishes a Release.
+- Local OTA builds require `./scripts/build.sh` (run in WSL2 or Linux with cross-compilation toolchain installed).
+
+### Deployment
+
+- The backend binary serves the frontend SPA in-process. Installed to `/opt/simadmin`, managed by systemd.
+- One-click install: `curl -fsSL https://raw.githubusercontent.com/voorz/SimAdmin/main/install_latest.sh | sh`
+- OTA updates can be applied via the web UI (`/ota`) or by uploading `simadmin.tar.gz` from GitHub Releases.
+- Target architecture: `aarch64-unknown-linux-musl` (static binary, no glibc dependency).
 
 ## Documentation
 
