@@ -1,3 +1,7 @@
+<a href="https://github.com/voorz/SimAdmin">
+  <img src="https://socialify.git.ci/voorz/SimAdmin/image?description=1&descriptionEditable=Web-based%20SIM%2FeSIM%20management%20system%20for%20Linux%20cellular%20devices&font=Source%20Code%20Pro&name=1&owner=1&pattern=Floating%20Cogs&theme=Auto" alt="SimAdmin" />
+</a>
+
 <div align="center">
   <br/>
 
@@ -21,6 +25,11 @@
     <a href="https://github.com/voorz/SimAdmin/releases">
       <img
         src="https://img.shields.io/github/downloads/voorz/SimAdmin/total?style=flat-square"
+      />
+    </a>
+    <a href="https://github.com/voorz/SimAdmin/actions">
+      <img
+        src="https://img.shields.io/github/actions/workflow/status/voorz/SimAdmin/build-ota-package.yml?style=flat-square&label=CI"
       />
     </a>
   </div>
