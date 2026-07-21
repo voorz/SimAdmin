@@ -85,8 +85,8 @@ jobs:
       - name: Build backend
         working-directory: backend
         run: |
-          export CC_${TARGET^^}_LINKER=musl-gcc
-          export CC_${TARGET^^}=musl-gcc
+          export CC_${TARGET//-/_}_LINKER=musl-gcc
+          export CC_${TARGET//-/_}=musl-gcc
           export SQLITE3_STATIC=1
           export LIBSQLITE3_SYS_USE_PKG_CONFIG=0
           cargo build --release --target ${{ matrix.target }}
