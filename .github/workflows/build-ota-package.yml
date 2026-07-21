@@ -250,7 +250,7 @@ jobs:
           files: |
             release/*.tar.gz
           overwrite_files: true
-          generate_release_notes: true
+          generate_release_notes: false
           body: |
             ## OTA Package
 
@@ -279,17 +279,6 @@ jobs:
             > SimAdmin communicates with modems through ModemManager's D-Bus API, not via direct AT commands.
             > This is why Debian/Ubuntu (which ship these services by default) are the primary targets.
             > Distributions without these services (e.g. OpenWrt, Alpine) require significant adaptation.
-
-            **Why not Docker?**
-
-            SimAdmin requires real-time access to system D-Bus, modem hardware (`/dev/ttyUSB*`), and NetworkManager.
-            Containerizing introduces unnecessary complexity:
-            - D-Bus socket passthrough (`/var/run/dbus` mount)
-            - Device file passthrough (`/dev` mount)
-            - Potential conflicts between container and host NetworkManager
-            - Loss of systemd service management benefits
-
-            For production, direct deployment on Debian/Ubuntu is the recommended approach.
 
             ### Installation
 
