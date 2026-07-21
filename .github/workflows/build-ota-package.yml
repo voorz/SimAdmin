@@ -1,26 +1,9 @@
 name: Build-OTA-Package
 
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version (e.g. 1.0.0)'
-        required: false
-        type: string
-        default: 'auto'
-      use_upx:
-        description: 'build with upx'
-        required: false
-        type: boolean
-        default: true
-      release_type:
-        description: 'Release type'
-        required: true
-        type: choice
-        default: 'latest'
-        options:
-          - 'latest'
-          - 'pre-release'
+  push:
+    tags:
+      - 'v*'
 
 env:
   CARGO_TERM_COLOR: always
@@ -40,23 +23,16 @@ jobs:
         with:
           fetch-depth: 0  # Full history for git commit hash
       
-      - name: Read VERSION
+      - name: Read version from tag
         id: version
-        env:
-          INPUT_VERSION: ${{ inputs.version }}
         run: |
+          # Extract version from tag name (strip leading 'v')
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG_NAME#v}"
           CURRENT_VERSION=$(cat VERSION | tr -d '[:space:]')
-          VERSION=$(echo "$INPUT_VERSION" | tr -d '[:space:]')
-
-          if [ -z "$VERSION" ] || [ "$VERSION" = "auto" ]; then
-            VERSION="$CURRENT_VERSION"
-            SOURCE="VERSION file"
-          else
-            SOURCE="workflow input"
-          fi
 
           if [ -z "$VERSION" ]; then
-            echo "Error: version cannot be empty"
+            echo "Error: could not extract version from tag $TAG_NAME"
             exit 1
           fi
 
@@ -68,9 +44,8 @@ jobs:
 
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
-          echo "version_source=$SOURCE" >> $GITHUB_OUTPUT
           echo "Current VERSION file: $CURRENT_VERSION"
-          echo "Build version: $VERSION ($SOURCE)"
+          echo "Build version: $VERSION (from tag $TAG_NAME)"
       
       # ==================== Install Rust toolchain ====================
       - name: Install Rust toolchain
@@ -85,9 +60,8 @@ jobs:
           sudo apt-get install -y musl-tools
           musl-gcc --version
       
-      # ==================== Install UPX (optional) ====================
+      # ==================== Install UPX ====================
       - name: Install UPX
-        if: inputs.use_upx == true
         run: |
           sudo apt-get install -y upx-ucl
           upx --version
@@ -144,9 +118,8 @@ jobs:
           ls -lh "$BINARY_PATH"
           file "$BINARY_PATH"
       
-      # ==================== UPX compression (optional) ====================
+      # ==================== UPX compression ====================
       - name: Compress binary with UPX
-        if: inputs.use_upx == true
         run: |
           BINARY_PATH="backend/target/aarch64-unknown-linux-musl/release/simadmin"
           
@@ -308,8 +281,6 @@ jobs:
       - name: Publish OTA package
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.version.outputs.version }}
-          name: v${{ steps.version.outputs.version }}
           files: |
             release/simadmin.tar.gz
           overwrite_files: true
@@ -322,7 +293,6 @@ jobs:
             - **Version**: ${{ steps.version.outputs.version }}
             - **Commit**: ${{ github.sha }}
             - **Build Time**: ${{ steps.package.outputs.build_time }}
-            - **Release Type**: ${{ inputs.release_type }}
             - **File**: `simadmin.tar.gz`
             - **MD5**: `${{ steps.package.outputs.ota_md5 }}`
             - **SHA-256**: `${{ steps.package.outputs.ota_sha256 }}`
@@ -337,9 +307,6 @@ jobs:
             # Apply OTA update
             curl -X POST http://IP:3000/api/ota/apply
             ```
-          draft: false
-          prerelease: ${{ inputs.release_type == 'pre-release' }}
-          make_latest: ${{ inputs.release_type == 'latest' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       
@@ -352,11 +319,8 @@ jobs:
           echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
           echo "| VERSION file | ${{ steps.version.outputs.current_version }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Version | ${{ steps.version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Source | ${{ steps.version.outputs.version_source }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Release Type | ${{ inputs.release_type }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Commit | ${{ github.sha }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Arch | aarch64-unknown-linux-musl |" >> $GITHUB_STEP_SUMMARY
-          echo "| UPX | ${{ inputs.use_upx }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Artifacts" >> $GITHUB_STEP_SUMMARY
           echo "- \`${{ steps.package.outputs.ota_file }}\`" >> $GITHUB_STEP_SUMMARY
