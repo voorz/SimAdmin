@@ -27,10 +27,6 @@
 
   <br/>
 
-  <picture>
-    <img src="./static/Dashboard_Dark.png" width="100%" alt="Dashboard (Dark)" />
-  </picture>
-
 </div>
 
 # SimAdmin - SIM/eSIM Hub
