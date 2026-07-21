@@ -13,60 +13,55 @@ permissions:
   contents: write
 
 jobs:
-  build-ota:
-    name: Build OTA Package
-    runs-on: ubuntu-24.04-arm
-    
+  build:
+    name: Build (${{ matrix.arch }})
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            arch: aarch64
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Full history for git commit hash
-      
+          fetch-depth: 0
+
       - name: Read version from tag
         id: version
         run: |
-          # Extract version from tag name (strip leading 'v')
           TAG_NAME="${GITHUB_REF#refs/tags/}"
           VERSION="${TAG_NAME#v}"
           CURRENT_VERSION=$(cat VERSION | tr -d '[:space:]')
-
           if [ -z "$VERSION" ]; then
             echo "Error: could not extract version from tag $TAG_NAME"
             exit 1
           fi
-
-          if ! echo "$VERSION" | grep -Eq '^[0-9]+(\.[0-9]+){1,3}([-.][0-9A-Za-z]+)*$'; then
-            echo "Error: invalid version format: $VERSION"
-            echo "Examples: 1.0.0, 1.0.0-beta.1"
-            exit 1
-          fi
-
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
-          echo "Current VERSION file: $CURRENT_VERSION"
-          echo "Build version: $VERSION (from tag $TAG_NAME)"
-      
-      # ==================== Install Rust toolchain ====================
+          echo "Build version: $VERSION (${{ matrix.arch }})"
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-unknown-linux-musl
-      
-      # ==================== Install cross-compilation toolchain ====================
-      - name: Install cross-compilation toolchain
+          targets: ${{ matrix.target }}
+
+      - name: Install musl toolchain
         run: |
           sudo apt-get update
           sudo apt-get install -y musl-tools
           musl-gcc --version
-      
-      # ==================== Install UPX ====================
+
       - name: Install UPX
         run: |
           sudo apt-get install -y upx-ucl
           upx --version
-      
-      # ==================== Cache Rust dependencies ====================
+
       - name: Cache Rust dependencies
         uses: actions/cache@v4
         with:
@@ -76,156 +71,86 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             backend/target/
-          key: ${{ runner.os }}-musl-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ matrix.arch }}-musl-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-musl-cargo-
-      
-      # ==================== Sync version numbers ====================
+            ${{ matrix.arch }}-musl-cargo-
+
       - name: Sync version numbers
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          echo "Syncing version: $VERSION"
-
-          # Update VERSION file to ensure build.rs APP_VERSION matches OTA package
           printf "%s\n" "$VERSION" > VERSION
-          
-          # Update backend/Cargo.toml
           sed -i "s/^version = \"[^\"]*\"/version = \"$VERSION\"/" backend/Cargo.toml
-          
-          # Update frontend/package.json
           sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" frontend/package.json
-          
-          echo "Version sync complete"
-      
-      # ==================== Build backend ====================
-      - name: Build backend (aarch64-unknown-linux-musl)
+
+      - name: Build backend
         working-directory: backend
         run: |
-          echo "Building backend (aarch64-unknown-linux-musl)..."
-
-          # Set cross-compilation environment variables
-          export CC_AARCH64_UNKNOWN_LINUX_MUSL=musl-gcc
-          export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc
+          export CC_${TARGET^^}_LINKER=musl-gcc
+          export CC_${TARGET^^}=musl-gcc
           export SQLITE3_STATIC=1
           export LIBSQLITE3_SYS_USE_PKG_CONFIG=0
-          
-          # Build
-          cargo build --release --target aarch64-unknown-linux-musl
-          
-          BINARY_PATH="target/aarch64-unknown-linux-musl/release/simadmin"
-          
-          echo "Backend build complete!"
+          cargo build --release --target ${{ matrix.target }}
+          BINARY_PATH="target/${{ matrix.target }}/release/simadmin"
           ls -lh "$BINARY_PATH"
           file "$BINARY_PATH"
-      
-      # ==================== UPX compression ====================
+        env:
+          TARGET: ${{ matrix.target }}
+
       - name: Compress binary with UPX
         run: |
-          BINARY_PATH="backend/target/aarch64-unknown-linux-musl/release/simadmin"
-          
-          echo "Compressing with UPX..."
+          BINARY_PATH="backend/target/${{ matrix.target }}/release/simadmin"
           BEFORE_SIZE=$(stat -c%s "$BINARY_PATH")
-          
           upx --best --lzma "$BINARY_PATH"
-          
           AFTER_SIZE=$(stat -c%s "$BINARY_PATH")
           RATIO=$(echo "scale=1; 100 - ($AFTER_SIZE * 100 / $BEFORE_SIZE)" | bc)
-          
-          echo "Compression complete! Saved: ${RATIO}%"
+          echo "Compression saved: ${RATIO}%"
           ls -lh "$BINARY_PATH"
-      
-      # ==================== Setup Node.js ====================
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '24'
-      
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 9
-      
-      - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-      
+
       - name: Cache pnpm store
         uses: actions/cache@v4
         with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          path: |
+            ~/.local/share/pnpm/store
+          key: ${{ matrix.arch }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
           restore-keys: |
-            ${{ runner.os }}-pnpm-store-
-      
-      # ==================== Build frontend ====================
+            ${{ matrix.arch }}-pnpm-store-
+
       - name: Build frontend
         working-directory: frontend
         run: |
-          echo "Building frontend..."
           pnpm install --frozen-lockfile
           pnpm run build
-          
-          echo "Frontend build complete!"
           ls -lh dist/
-      
-      # ==================== Package OTA ====================
+
       - name: Package OTA
+        id: package
         run: |
-          echo "=========================================="
-          echo "  Generate OTA package"
-          echo "=========================================="
-          echo ""
-          
           VERSION="${{ steps.version.outputs.version }}"
           COMMIT=$(git rev-parse --short HEAD)
           BUILD_TIME=$(TZ=Asia/Shanghai date +"%Y-%m-%dT%H:%M:%S+08:00")
-          ARCH="aarch64-unknown-linux-musl"
-          
-          BINARY_PATH="backend/target/aarch64-unknown-linux-musl/release/simadmin"
+          ARCH="${{ matrix.arch }}"
+          BINARY_PATH="backend/target/${{ matrix.target }}/release/simadmin"
           FRONTEND_DIR="frontend/dist"
-          
-          # Check build artifacts
-          if [ ! -f "$BINARY_PATH" ]; then
-            echo "Error: backend binary not found"
-            exit 1
-          fi
-          
-          if [ ! -d "$FRONTEND_DIR" ]; then
-            echo "Error: frontend build output not found"
-            exit 1
-          fi
-          
-          # Create temp directory
+
           OTA_TMP=$(mktemp -d)
-          
-          echo "Version: $VERSION"
-          echo "Commit: $COMMIT"
-          echo "Build time: $BUILD_TIME"
-          echo "Arch: $ARCH"
-          echo ""
-          
-          # Copy backend binary
-          echo "Copying backend binary..."
           cp "$BINARY_PATH" "$OTA_TMP/simadmin"
           chmod 755 "$OTA_TMP/simadmin"
-          
-          # Calculate binary MD5
           BINARY_MD5=$(md5sum "$OTA_TMP/simadmin" | cut -d' ' -f1)
-          echo "   MD5: $BINARY_MD5"
-          
-          # Copy frontend files
-          echo "Copying frontend files..."
+
           mkdir -p "$OTA_TMP/www"
           cp -r "$FRONTEND_DIR"/* "$OTA_TMP/www/"
-
-          # Calculate frontend MD5
-          echo "Calculating frontend MD5..."
           FRONTEND_MD5=$(find "$OTA_TMP/www" -type f -exec md5sum {} \; | cut -d' ' -f1 | sort | md5sum | cut -d' ' -f1)
-          echo "   MD5: $FRONTEND_MD5"
-          
-          # Generate meta.json
-          echo "Generating meta.json..."
+
           cat > "$OTA_TMP/meta.json" << EOF
           {
               "version": "$VERSION",
@@ -236,93 +161,155 @@ jobs:
               "arch": "$ARCH"
           }
           EOF
-          
-          cat "$OTA_TMP/meta.json"
-          echo ""
-          
-          # Create output directory
+
           mkdir -p release
-          
-          # Package
-          OTA_FILE="release/simadmin.tar.gz"
-          echo "Packaging OTA..."
+          OTA_FILE="release/simadmin_v${VERSION}_${ARCH}.tar.gz"
           cd "$OTA_TMP"
           tar -czf "$GITHUB_WORKSPACE/$OTA_FILE" meta.json simadmin www
           cd "$GITHUB_WORKSPACE"
-          
-          # Display results
-          echo ""
-          echo "=========================================="
-          echo "OTA package created!"
-          echo "=========================================="
-          echo ""
-          echo "Output: $OTA_FILE"
-          ls -lh "$OTA_FILE"
-          echo ""
-          echo "Contents:"
-          tar -tzf "$OTA_FILE" | head -20
-          echo ""
-          
-          # Calculate package MD5 and SHA-256
+
           OTA_MD5=$(md5sum "$OTA_FILE" | cut -d' ' -f1)
           OTA_SHA256=$(sha256sum "$OTA_FILE" | cut -d' ' -f1)
-          echo "OTA MD5: $OTA_MD5"
-          echo "OTA SHA-256: $OTA_SHA256"
-          echo ""
-          
-          # Save outputs
+
           echo "ota_file=$OTA_FILE" >> $GITHUB_OUTPUT
           echo "ota_md5=$OTA_MD5" >> $GITHUB_OUTPUT
           echo "ota_sha256=$OTA_SHA256" >> $GITHUB_OUTPUT
           echo "build_time=$BUILD_TIME" >> $GITHUB_OUTPUT
-        id: package
-      
-      # ==================== Publish OTA Release ====================
-      - name: Publish OTA package
+
+          ls -lh "$OTA_FILE"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ota-${{ matrix.arch }}
+          path: release/*.tar.gz
+
+      - name: Build Summary
+        run: |
+          echo "## Build ${{ matrix.arch }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | ${{ steps.version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Arch | ${{ matrix.target }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| File | \`${{ steps.package.outputs.ota_file }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| MD5 | \`${{ steps.package.outputs.ota_md5 }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| SHA-256 | \`${{ steps.package.outputs.ota_sha256 }}\` |" >> $GITHUB_STEP_SUMMARY
+
+  release:
+    name: Publish Release
+    needs: build
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Read version from tag
+        id: version
+        run: |
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG_NAME#v}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "commit=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+
+      - name: Calculate checksums
+        id: checksums
+        run: |
+          cd release
+          AARCH64_FILE=$(ls *aarch64*.tar.gz 2>/dev/null || echo "")
+          X86_64_FILE=$(ls *x86_64*.tar.gz 2>/dev/null || echo "")
+
+          if [ -n "$AARCH64_FILE" ]; then
+            AARCH64_MD5=$(md5sum "$AARCH64_FILE" | cut -d' ' -f1)
+            AARCH64_SHA256=$(sha256sum "$AARCH64_FILE" | cut -d' ' -f1)
+            echo "aarch64_file=$AARCH64_FILE" >> $GITHUB_OUTPUT
+            echo "aarch64_md5=$AARCH64_MD5" >> $GITHUB_OUTPUT
+            echo "aarch64_sha256=$AARCH64_SHA256" >> $GITHUB_OUTPUT
+          fi
+
+          if [ -n "$X86_64_FILE" ]; then
+            X86_64_MD5=$(md5sum "$X86_64_FILE" | cut -d' ' -f1)
+            X86_64_SHA256=$(sha256sum "$X86_64_FILE" | cut -d' ' -f1)
+            echo "x86_64_file=$X86_64_FILE" >> $GITHUB_OUTPUT
+            echo "x86_64_md5=$X86_64_MD5" >> $GITHUB_OUTPUT
+            echo "x86_64_sha256=$X86_64_SHA256" >> $GITHUB_OUTPUT
+          fi
+
+          BUILD_TIME=$(TZ=Asia/Shanghai date +"%Y-%m-%dT%H:%M:%S+08:00")
+          echo "build_time=$BUILD_TIME" >> $GITHUB_OUTPUT
+
+      - name: Publish Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            release/simadmin.tar.gz
+            release/*.tar.gz
           overwrite_files: true
           generate_release_notes: true
           body: |
             ## OTA Package
-            
+
             ### Version Info
-            
+
             - **Version**: ${{ steps.version.outputs.version }}
-            - **Commit**: ${{ github.sha }}
-            - **Build Time**: ${{ steps.package.outputs.build_time }}
-            - **File**: `simadmin.tar.gz`
-            - **MD5**: `${{ steps.package.outputs.ota_md5 }}`
-            - **SHA-256**: `${{ steps.package.outputs.ota_sha256 }}`
-            
+            - **Commit**: ${{ steps.checksums.outputs.commit }}
+            - **Build Time**: ${{ steps.checksums.outputs.build_time }}
+
+            ### Artifacts
+
+            | File | Arch | Target Platform | MD5 | SHA-256 |
+            |------|------|----------------|-----|---------|
+            | `${{ steps.checksums.outputs.aarch64_file }}` | aarch64 | ARM64 devices (CPE, routers, edge gateways) | `${{ steps.checksums.outputs.aarch64_md5 }}` | `${{ steps.checksums.outputs.aarch64_sha256 }}` |
+            | `${{ steps.checksums.outputs.x86_64_file }}` | x86_64 | x86 servers, dev machines, WSL | `${{ steps.checksums.outputs.x86_64_md5 }}` | `${{ steps.checksums.outputs.x86_64_sha256 }}` |
+
+            ### System Requirements
+
+            **Supported OS**: Debian 11+, Ubuntu 20.04+, or any Linux distribution with:
+
+            - **systemd** — service management
+            - **D-Bus** — IPC bus for ModemManager and NetworkManager
+            - **ModemManager** + `mmcli` — modem abstraction layer
+            - **NetworkManager** + `nmcli` — network management
+
+            > SimAdmin communicates with modems through ModemManager's D-Bus API, not via direct AT commands.
+            > This is why Debian/Ubuntu (which ship these services by default) are the primary targets.
+            > Distributions without these services (e.g. OpenWrt, Alpine) require significant adaptation.
+
+            **Why not Docker?**
+
+            SimAdmin requires real-time access to system D-Bus, modem hardware (`/dev/ttyUSB*`), and NetworkManager.
+            Containerizing introduces unnecessary complexity:
+            - D-Bus socket passthrough (`/var/run/dbus` mount)
+            - Device file passthrough (`/dev` mount)
+            - Potential conflicts between container and host NetworkManager
+            - Loss of systemd service management benefits
+
+            For production, direct deployment on Debian/Ubuntu is the recommended approach.
+
             ### Installation
-            
+
             ```bash
-            # Upload OTA package to device
-            curl -X POST http://IP:3000/api/ota/upload \
-              -F "file=@simadmin.tar.gz"
-            
-            # Apply OTA update
-            curl -X POST http://IP:3000/api/ota/apply
+            # Download the matching package for your architecture
+            # aarch64 (ARM64 devices)
+            wget https://github.com/voorz/SimAdmin/releases/download/v${{ steps.version.outputs.version }}/${{ steps.checksums.outputs.aarch64_file }}
+
+            # x86_64 (servers, WSL)
+            wget https://github.com/voorz/SimAdmin/releases/download/v${{ steps.version.outputs.version }}/${{ steps.checksums.outputs.x86_64_file }}
+
+            # Upload to device and apply via web UI (/ota), or:
+            curl -X POST http://<device-ip>:3000/api/ota/upload -F "file=@<package>.tar.gz"
+            curl -X POST http://<device-ip>:3000/api/ota/apply
+            ```
+
+            Or use the one-click install script:
+            ```bash
+            curl -fsSL https://raw.githubusercontent.com/voorz/SimAdmin/main/install_latest.sh | sh
             ```
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      
-      # ==================== Build Summary ====================
-      - name: Build Summary
-        run: |
-          echo "## OTA Build Complete" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| VERSION file | ${{ steps.version.outputs.current_version }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Version | ${{ steps.version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Commit | ${{ github.sha }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Arch | aarch64-unknown-linux-musl |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Artifacts" >> $GITHUB_STEP_SUMMARY
-          echo "- \`${{ steps.package.outputs.ota_file }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- MD5: \`${{ steps.package.outputs.ota_md5 }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- SHA-256: \`${{ steps.package.outputs.ota_sha256 }}\`" >> $GITHUB_STEP_SUMMARY
