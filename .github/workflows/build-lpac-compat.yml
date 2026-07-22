@@ -44,7 +44,7 @@ jobs:
           fi
           
           # 3. 读取我们当前打包的版本 (从我们仓库 releases/download/lpac/lpac.json)
-          OUR_MANIFEST=$(curl -sL -f https://github.com/3899/SimAdmin/releases/download/lpac/lpac.json || echo "{}")
+          OUR_MANIFEST=$(curl -sL -f https://github.com/voorz/SimAdmin/releases/download/lpac/lpac.json || echo "{}")
           OUR_TAG=$(echo "$OUR_MANIFEST" | jq -r '.version // empty' || echo "")
           echo "Our current compiled lpac tag: $OUR_TAG"
           

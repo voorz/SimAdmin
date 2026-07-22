@@ -531,7 +531,7 @@ impl NotificationSender {
 
         let channel_type = channel.channel_type.label();
         let text = format!(
-            "{channel_type} 信使打卡成功✅\n服务支持：SimAdmin 开源项目\n简介：一站式 SIM/eSIM 蜂窝设备管理系统\nGitHub：https://github.com/3899/SimAdmin"
+            "{channel_type} 信使打卡成功✅\n服务支持：SimAdmin 开源项目\n简介：一站式 SIM/eSIM 蜂窝设备管理系统\nGitHub：https://github.com/voorz/SimAdmin"
         );
 
         self.send_text_to_channel(channel, &format!("{channel_type} 信使打卡成功✅"), &text)
@@ -3942,7 +3942,7 @@ mod tests {
             asset_name: "simadmin_1.0.4.tar.gz".to_string(),
             version: "1.0.4".to_string(),
             build_time: "2026-05-14T16:30:45Z".to_string(),
-            release_url: "https://github.com/3899/SimAdmin/releases/tag/v1.0.4".to_string(),
+            release_url: "https://github.com/voorz/SimAdmin/releases/tag/v1.0.4".to_string(),
             timestamp: "2026-05-14T17:00:00Z".to_string(),
             own_number: "+10001".to_string(),
         };

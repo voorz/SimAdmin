@@ -63,7 +63,7 @@ type MarkdownBlock =
   | { type: 'quote'; text: string }
   | { type: 'rule' }
 
-const GITHUB_LATEST_RELEASE_PAGE = 'https://github.com/3899/SimAdmin/releases/latest'
+const GITHUB_LATEST_RELEASE_PAGE = 'https://github.com/voorz/SimAdmin/releases/latest'
 const BEIJING_TIME_ZONE = 'Asia/Shanghai'
 
 function normalizeVersion(version: string) {

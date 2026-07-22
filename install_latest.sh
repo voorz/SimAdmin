@@ -2,7 +2,7 @@
 
 set -eu
 
-REPO="${REPO:-3899/SimAdmin}"
+REPO="${REPO:-voorz/SimAdmin}"
 INSTALL_DIR="${INSTALL_DIR:-/opt/simadmin}"
 SERVICE_NAME="${SERVICE_NAME:-simadmin}"
 VERSION="${VERSION:-latest}"
@@ -13,12 +13,13 @@ SERVICE_URL="${SERVICE_URL:-${RAW_BASE}/main/scripts/simadmin.service}"
 MODEM_RECOVERY_SCRIPT_URL="${MODEM_RECOVERY_SCRIPT_URL:-${RAW_BASE}/main/scripts/simadmin-modem-recovery.sh}"
 MODEM_RECOVERY_SERVICE_URL="${MODEM_RECOVERY_SERVICE_URL:-${RAW_BASE}/main/scripts/simadmin-modem-recovery.service}"
 ASSET_URL="${ASSET_URL:-}"
-ASSET_NAME="${ASSET_NAME:-simadmin.tar.gz}"
+ASSET_NAME="${ASSET_NAME:-}"
+TARGET_ARCH="${TARGET_ARCH:-}"
 SIMADMIN_INSTALL_LPAC="${SIMADMIN_INSTALL_LPAC:-1}"
 LPAC_REPO="${LPAC_REPO:-estkme-group/lpac}"
 LPAC_RELEASE_BASE_URL="${LPAC_RELEASE_BASE_URL:-https://github.com/${LPAC_REPO}/releases/latest/download}"
 LPAC_LATEST_RELEASE_URL="${LPAC_LATEST_RELEASE_URL:-https://github.com/${LPAC_REPO}/releases/latest}"
-LPAC_COMPAT_RELEASE_BASE_URL="${LPAC_COMPAT_RELEASE_BASE_URL:-https://github.com/3899/SimAdmin/releases/download/lpac}"
+LPAC_COMPAT_RELEASE_BASE_URL="${LPAC_COMPAT_RELEASE_BASE_URL:-https://github.com/voorz/SimAdmin/releases/download/lpac}"
 LPAC_COMPAT_MANIFEST_NAME="${LPAC_COMPAT_MANIFEST_NAME:-lpac.json}"
 LPAC_TARGET_ARCH="${LPAC_TARGET_ARCH:-}"
 LPAC_TARGET_VERSION="${LPAC_TARGET_VERSION:-}"
@@ -97,6 +98,24 @@ read_with_proxies() {
   return 1
 }
 
+detect_arch() {
+  if [ -n "$TARGET_ARCH" ]; then
+    printf '%s\n' "$TARGET_ARCH"
+    return 0
+  fi
+  arch="$(uname -m)"
+  case "$arch" in
+    aarch64|arm64) printf 'arm64\n' ;;
+    x86_64|amd64) printf 'amd64\n' ;;
+    *) echo "error: unsupported architecture: $arch" >&2; exit 1 ;;
+  esac
+}
+
+latest_release_tag() {
+  api_url="https://api.github.com/repos/${REPO}/releases/latest"
+  curl -fsSL "$api_url" 2>/dev/null | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1
+}
+
 version_to_tag() {
   case "$1" in
     v*) printf '%s\n' "$1" ;;
@@ -106,7 +125,9 @@ version_to_tag() {
 
 asset_url_from_tag() {
   tag="$1"
-  printf 'https://github.com/%s/releases/download/%s/simadmin.tar.gz\n' "$REPO" "$tag"
+  ver="${tag#v}"
+  arch="$(detect_arch)"
+  printf 'https://github.com/%s/releases/download/%s/simadmin_v%s_linux_%s.tar.gz\n' "$REPO" "$tag" "$ver" "$arch"
 }
 
 repo_version() {
@@ -123,8 +144,22 @@ resolve_asset_url() {
     return 0
   fi
 
+  if [ -n "$ASSET_NAME" ]; then
+    if [ "$VERSION" = "latest" ]; then
+      printf 'https://github.com/%s/releases/latest/download/%s\n' "$REPO" "$ASSET_NAME"
+    else
+      asset_url_from_tag "$(version_to_tag "$VERSION")"
+    fi
+    return 0
+  fi
+
   if [ "$VERSION" = "latest" ]; then
-    printf 'https://github.com/%s/releases/latest/download/%s\n' "$REPO" "$ASSET_NAME"
+    if tag="$(latest_release_tag)" && [ -n "$tag" ]; then
+      asset_url_from_tag "$tag"
+      return 0
+    fi
+    arch="$(detect_arch)"
+    printf 'https://github.com/%s/releases/latest/download/simadmin_linux_%s.tar.gz\n' "$REPO" "$arch"
   else
     asset_url_from_tag "$(version_to_tag "$VERSION")"
   fi
@@ -510,7 +545,7 @@ lpac_asset_name_from_url() {
 lpac_url_source() {
   url="$1"
   case "$url" in
-    "$LPAC_COMPAT_RELEASE_BASE_URL"/*|https://github.com/3899/SimAdmin/releases/download/lpac/*)
+    "$LPAC_COMPAT_RELEASE_BASE_URL"/*|https://github.com/voorz/SimAdmin/releases/download/lpac/*)
       printf '%s\n' "compat"
       ;;
     "$LPAC_RELEASE_BASE_URL"/*|https://github.com/"$LPAC_REPO"/releases/latest/download/*|https://github.com/"$LPAC_REPO"/releases/download/*)

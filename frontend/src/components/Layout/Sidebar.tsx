@@ -421,7 +421,7 @@ export default function Sidebar({
       >
         <Box
           component="a"
-          href="https://github.com/3899/SimAdmin"
+          href="https://github.com/voorz/SimAdmin"
           target="_blank"
           rel="noopener noreferrer"
           sx={{
@@ -447,7 +447,7 @@ export default function Sidebar({
               transition: `opacity ${SIDEBAR_TRANSITION}, max-width ${SIDEBAR_TRANSITION}`,
             }}
           >
-            3899/SimAdmin
+            voorz/SimAdmin
           </Typography>
         </Box>
         <Box
@@ -462,7 +462,7 @@ export default function Sidebar({
             v{__APP_VERSION__} ({__GIT_BRANCH__}/{__GIT_COMMIT__})
           </Typography>
           <Typography variant="caption" color="text.disabled" sx={{ display: 'block', mt: 0.5 }}>
-            Copyright © 2026 @3899
+            Copyright © 2026 @voorz
           </Typography>
         </Box>
       </Box>
