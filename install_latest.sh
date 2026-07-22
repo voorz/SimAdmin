@@ -787,7 +787,7 @@ check_and_install_deps() {
   echo "==> 检查系统依赖"
 
   missing=""
-  for dep in dbus ModemManager NetworkManager; do
+  for dep in dbus ModemManager NetworkManager pcscd; do
     if systemctl is-active --quiet "$dep" 2>/dev/null \
        || systemctl is-enabled --quiet "$dep" 2>/dev/null; then
       echo "    [OK] $dep"
@@ -833,6 +833,12 @@ check_and_install_deps() {
     echo "error: 未找到支持的包管理器 (apt/dnf/yum/apk/pacman)" >&2
     echo "       请手动安装:$missing" >&2
     return 1
+  fi
+
+  # 启用并启动 pcscd (智能卡守护进程, lpac 依赖)
+  if echo "$missing" | grep -qw pcscd; then
+    systemctl enable pcscd >/dev/null 2>&1 || true
+    systemctl start pcscd >/dev/null 2>&1 || true
   fi
 
   echo "    依赖安装完成"

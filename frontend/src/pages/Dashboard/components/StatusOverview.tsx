@@ -1,5 +1,4 @@
-import { Box, Chip, Typography, Paper, useTheme, type Theme } from '@mui/material'
-import { alpha } from '@/utils/theme'
+import { Box, Chip, Typography, Paper } from '@mui/material'
 import {
   SignalCellularAlt,
   WifiTethering,
@@ -27,8 +26,7 @@ export function StatusOverview({
   airplaneMode,
   roaming,
 }: StatusOverviewProps) {
-  const theme = useTheme<Theme>()
-
+  
   // 获取网络制式显示
   const getNetworkTech = () => {
     if (cellsInfo?.serving_cell?.tech) {
@@ -49,15 +47,9 @@ export function StatusOverview({
         p: 2,
         mb: 2,
         borderRadius: 2,
-        background: (() => {
-          const primaryMain = (theme.palette.primary as { main: string }).main
-          const secondaryMain = (theme.palette.secondary as { main: string }).main
-          return `linear-gradient(135deg, ${alpha(primaryMain, 0.08)} 0%, ${alpha(secondaryMain, 0.03)} 100%)`
-        })(),
-        border: (() => {
-          const primaryMain = (theme.palette.primary as { main: string }).main
-          return `1px solid ${alpha(primaryMain, 0.1)}`
-        })(),
+        background: 'transparent',
+        border: '1px solid',
+        borderColor: 'divider',
       }}
     >
       <Box display="flex" flexWrap="wrap" alignItems="center" gap={2}>

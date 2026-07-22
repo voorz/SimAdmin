@@ -18,7 +18,6 @@ import {
   DialogTitle,
   Divider,
   FormControl,
-  FormControlLabel,
   IconButton,
   InputBase,
   InputLabel,
@@ -43,6 +42,7 @@ import {
   Save,
   Shield,
   SimCard,
+  Speed,
   Timer,
   Wifi,
 } from '@mui/icons-material'
@@ -59,6 +59,7 @@ import {
   validatePasswordAgainstSecurity,
 } from '../lib/passwordPolicy'
 import { useWorkMode } from '../contexts/WorkModeContext'
+import { useRefreshInterval } from '../contexts/RefreshContext'
 import type { AirplaneModeResponse, SecurityConfig, VowifiConfig, WorkMode } from '../api/types'
 
 interface HealthStatus {
@@ -155,6 +156,7 @@ function validateSecurityConfig(config: SecurityConfig) {
 
 export default function ConfigurationPage() {
   const { mode, refreshWorkMode } = useWorkMode()
+  const { refreshInterval, setRefreshInterval } = useRefreshInterval()
   const location = useLocation()
   const isSecurity = location.pathname === '/config/security'
   const [loading, setLoading] = useState(true)
@@ -1029,29 +1031,25 @@ export default function ConfigurationPage() {
                 本开关仅控制 WiFi Calling 模块的显示状态与相关能力开放，不会自动连接 WiFi 通话。
               </Typography>
               <Divider sx={{ my: 2 }} />
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={vowifiConfig?.feature_enabled || false}
-                    onChange={() => void toggleVowifiFeature()}
-                    disabled={vowifiFeatureSwitching}
-                    color="primary"
-                  />
-                }
-                label={
-                  <Box display="flex" alignItems="center" gap={1}>
-                    {vowifiFeatureSwitching && <CircularProgress size={16} />}
-                    <Box>
-                      <Typography variant="body1" fontWeight={600}>
-                        {vowifiConfig?.feature_enabled ? 'WiFi Calling 功能模块已开启' : 'WiFi Calling 功能模块已关闭'}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {vowifiConfig?.feature_enabled ? '您可在「仪表盘 - 快捷控制」卡片，或「SIM 卡 - WiFi Calling」页签中，手动开启 WiFi Calling 连接。' : '系统将完全隐藏所有 WiFi Calling 相关入口，不加载任何对应进程，避免额外占用系统资源。'}
-                      </Typography>
-                    </Box>
+              <Box display="flex" alignItems="center" justifyContent="space-between" gap={2}>
+                <Box display="flex" alignItems="center" gap={1}>
+                  {vowifiFeatureSwitching && <CircularProgress size={16} />}
+                  <Box>
+                    <Typography variant="body1" fontWeight={600}>
+                      {vowifiConfig?.feature_enabled ? 'WiFi Calling 功能模块已开启' : 'WiFi Calling 功能模块已关闭'}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {vowifiConfig?.feature_enabled ? '您可在「仪表盘 - 快捷控制」卡片，或「SIM 卡 - WiFi Calling」页签中，手动开启 WiFi Calling 连接。' : '系统将完全隐藏所有 WiFi Calling 相关入口，不加载任何对应进程，避免额外占用系统资源。'}
+                    </Typography>
                   </Box>
-                }
-              />
+                </Box>
+                <Switch
+                  checked={vowifiConfig?.feature_enabled || false}
+                  onChange={() => void toggleVowifiFeature()}
+                  disabled={vowifiFeatureSwitching}
+                  color="primary"
+                />
+              </Box>
             </CardContent>
           </Card>
 
@@ -1077,25 +1075,21 @@ export default function ConfigurationPage() {
                     控制设备的数据连接状态。禁用后设备将断开移动网络连接。
                   </Typography>
                   <Divider sx={{ my: 2 }} />
-                  <FormControlLabel
-                    control={
-                      <Switch
-                        checked={dataStatus}
-                        onChange={() => void toggleDataConnection()}
-                        color="primary"
-                      />
-                    }
-                    label={
-                      <Box>
-                        <Typography variant="body1" fontWeight={600}>
-                          {dataStatus ? '数据连接已启用' : '数据连接已禁用'}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          立即{dataStatus ? '断开' : '启用'}移动数据连接
-                        </Typography>
-                      </Box>
-                    }
-                  />
+              <Box display="flex" alignItems="center" justifyContent="space-between" gap={2}>
+                <Box>
+                  <Typography variant="body1" fontWeight={600}>
+                    {dataStatus ? '数据连接已启用' : '数据连接已禁用'}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    立即{dataStatus ? '断开' : '启用'}移动数据连接
+                  </Typography>
+                </Box>
+                <Switch
+                  checked={dataStatus}
+                  onChange={() => void toggleDataConnection()}
+                  color="primary"
+                />
+              </Box>
                   <Alert
                     severity="info"
                     sx={{
@@ -1130,29 +1124,25 @@ export default function ConfigurationPage() {
                     开启飞行模式将关闭射频，设备将无法连接移动网络。这不会影响本机 Web 管理访问。
                   </Typography>
                   <Divider sx={{ my: 2 }} />
-                  <FormControlLabel
-                    control={
-                      <Switch
-                        checked={airplaneMode?.enabled || false}
-                        onChange={() => void toggleAirplaneMode()}
-                        disabled={airplaneSwitching}
-                        color="warning"
-                      />
-                    }
-                    label={
-                      <Box display="flex" alignItems="center" gap={1}>
-                        {airplaneSwitching && <CircularProgress size={16} />}
-                        <Box>
-                          <Typography variant="body1" fontWeight={600}>
-                            {airplaneMode?.enabled ? '飞行模式已开启' : '飞行模式已关闭'}
-                          </Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            {airplaneMode?.enabled ? '射频已关闭，无法连接网络' : '射频正常工作'}
-                          </Typography>
-                        </Box>
-                      </Box>
-                    }
-                  />
+              <Box display="flex" alignItems="center" justifyContent="space-between" gap={2}>
+                <Box display="flex" alignItems="center" gap={1}>
+                  {airplaneSwitching && <CircularProgress size={16} />}
+                  <Box>
+                    <Typography variant="body1" fontWeight={600}>
+                      {airplaneMode?.enabled ? '飞行模式已开启' : '飞行模式已关闭'}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {airplaneMode?.enabled ? '射频已关闭，无法连接网络' : '射频正常工作'}
+                    </Typography>
+                  </Box>
+                </Box>
+                <Switch
+                  checked={airplaneMode?.enabled || false}
+                  onChange={() => void toggleAirplaneMode()}
+                  disabled={airplaneSwitching}
+                  color="warning"
+                />
+              </Box>
                   <Box mt={controlFollowupGap} mb={controlFollowupGap} p={2} sx={{ bgcolor: 'action.hover', borderRadius: 1 }}>
                     <Typography variant="body2" color="text.secondary" gutterBottom>
                       <strong>当前状态详情</strong>
@@ -1179,6 +1169,37 @@ export default function ConfigurationPage() {
               </Card>
             </Grid>
           </Grid>
+        </Box>
+      )}
+
+      {!isSecurity && (
+        <Box sx={{ pt: 2 }}>
+          <Card>
+            <CardHeader
+              avatar={<Speed color="primary" />}
+              title="页面刷新频率"
+              titleTypographyProps={{ variant: 'h6', fontWeight: 600 }}
+            />
+            <CardContent>
+              <Typography variant="body2" color="text.secondary" paragraph>
+                设置仪表盘等页面的自动刷新间隔。选择「手动」则关闭自动刷新，需手动点击刷新按钮。
+              </Typography>
+              <FormControl fullWidth>
+                <InputLabel>刷新间隔</InputLabel>
+                <Select
+                  value={refreshInterval}
+                  label="刷新间隔"
+                  onChange={(event) => setRefreshInterval(Number(event.target.value))}
+                >
+                  <MenuItem value={1000}>1 秒/次</MenuItem>
+                  <MenuItem value={3000}>3 秒/次</MenuItem>
+                  <MenuItem value={5000}>5 秒/次</MenuItem>
+                  <MenuItem value={10000}>10 秒/次</MenuItem>
+                  <MenuItem value={0}>手动刷新</MenuItem>
+                </Select>
+              </FormControl>
+            </CardContent>
+          </Card>
         </Box>
       )}
 

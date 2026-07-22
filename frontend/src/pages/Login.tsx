@@ -48,9 +48,9 @@ function LogoMark({ active }: { active: boolean }) {
         placeItems: 'center',
         bgcolor: (theme) => theme.palette.mode === 'light' ? 'rgba(255,255,255,0.44)' : 'rgba(255,255,255,0.06)',
         border: '1px solid',
-        borderColor: (theme) => theme.palette.mode === 'light' ? 'rgba(255,255,255,0.74)' : 'rgba(148,163,184,0.18)',
+        borderColor: (theme) => theme.palette.mode === 'light' ? 'rgba(255,255,255,0.74)' : 'rgba(255,255,255,0.12)',
         boxShadow: (theme) => theme.palette.mode === 'light'
-          ? 'inset 0 1px 0 rgba(255,255,255,0.72), 0 16px 32px -24px rgba(15,23,42,0.42)'
+          ? 'inset 0 1px 0 rgba(255,255,255,0.72), 0 16px 32px -24px rgba(0,0,0,0.42)'
           : 'inset 0 1px 0 rgba(255,255,255,0.08), 0 18px 34px -26px rgba(0,0,0,0.82)',
         transition: 'box-shadow 180ms ease, transform 180ms ease',
         transform: active ? 'translateY(-1px)' : 'none',
@@ -66,8 +66,8 @@ function LogoMark({ active }: { active: boolean }) {
           height: 132,
           display: 'block',
           filter: active
-            ? 'drop-shadow(0 0 12px rgba(18,150,219,0.42))'
-            : 'drop-shadow(0 14px 18px rgba(15,23,42,0.18))',
+            ? 'drop-shadow(0 0 12px rgba(255,255,255,0.3))'
+            : 'drop-shadow(0 14px 18px rgba(0,0,0,0.18))',
           transition: 'transform 180ms ease',
           '&:hover': { transform: 'scale(1.04)' },
         }}
@@ -89,7 +89,7 @@ function ForgotPasswordTooltip({ visible }: { visible: boolean }) {
             bgcolor: 'rgba(255,255,255,0.94)',
             color: '#334155',
             border: '1px solid rgba(226,232,240,0.9)',
-            boxShadow: '0 18px 48px -24px rgba(15,23,42,0.38)',
+            boxShadow: '0 18px 48px -24px rgba(0,0,0,0.38)',
             backdropFilter: 'blur(18px)',
             WebkitBackdropFilter: 'blur(18px)',
           },
@@ -275,9 +275,6 @@ export default function Login() {
           position: 'fixed',
           inset: 0,
           pointerEvents: 'none',
-          background: theme.palette.mode === 'light'
-            ? 'radial-gradient(circle at 6% 2%, rgba(147,197,253,0.52), transparent 32%), radial-gradient(circle at 96% 22%, rgba(196,181,253,0.38), transparent 34%), radial-gradient(circle at 42% 108%, rgba(110,231,183,0.28), transparent 34%)'
-            : 'radial-gradient(circle at 8% 0%, rgba(18,150,219,0.28), transparent 34%), radial-gradient(circle at 98% 24%, rgba(124,58,237,0.24), transparent 34%), radial-gradient(circle at 42% 110%, rgba(16,185,129,0.16), transparent 36%)',
         },
       }}
     >
@@ -317,7 +314,7 @@ export default function Login() {
                     borderRadius: 1.5,
                     border: '1px solid',
                     borderColor: focused ? 'primary.main' : 'divider',
-                    bgcolor: theme.palette.mode === 'light' ? 'rgba(255,255,255,0.62)' : 'rgba(2,6,23,0.34)',
+                    bgcolor: theme.palette.mode === 'light' ? 'rgba(255,255,255,0.62)' : 'rgba(30,30,30,0.34)',
                     boxShadow: focused ? `0 0 0 3px ${theme.palette.primary.main}22` : 'none',
                     transition: 'border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease',
                   }}
@@ -366,7 +363,7 @@ export default function Login() {
                         borderRadius: 1.5,
                         border: '1px solid',
                         borderColor: 'divider',
-                        bgcolor: theme.palette.mode === 'light' ? 'rgba(255,255,255,0.62)' : 'rgba(2,6,23,0.34)',
+                        bgcolor: theme.palette.mode === 'light' ? 'rgba(255,255,255,0.62)' : 'rgba(30,30,30,0.34)',
                       }}
                     >
                       <LockIcon sx={{ ml: 1.7, mr: 0.5, color: 'text.secondary', fontSize: 20 }} />

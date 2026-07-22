@@ -9,12 +9,7 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
-  Divider,
   IconButton,
-  ListItemIcon,
-  ListItemText,
-  Menu,
-  MenuItem,
   Snackbar,
   Stack,
   SvgIcon,
@@ -26,10 +21,8 @@ import {
   Brightness4 as DarkModeIcon,
   Brightness7 as LightModeIcon,
   Menu as MenuIcon,
-  MoreVert as MoreVertIcon,
   Refresh as RefreshIcon,
   Router as RouterIcon,
-  Speed as SpeedIcon,
 } from '@mui/icons-material'
 import { useTheme } from '../../contexts/ThemeContext'
 import { useRefreshInterval } from '../../contexts/RefreshContext'
@@ -43,8 +36,6 @@ type RestartConfirmTarget = 'baseband' | 'service' | 'device'
 interface TopBarProps {
   drawerWidth: number
   onMenuClick: () => void
-  refreshInterval: number
-  onRefreshIntervalChange: (interval: number) => void
 }
 
 function ServiceRestartIcon() {
@@ -66,13 +57,9 @@ function DeviceRebootIcon() {
 export default function TopBar({
   drawerWidth,
   onMenuClick,
-  refreshInterval,
-  onRefreshIntervalChange,
 }: TopBarProps) {
   const { mode, toggleTheme } = useTheme()
   const { triggerRefresh } = useRefreshInterval()
-  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null)
-  const [refreshMenuAnchor, setRefreshMenuAnchor] = useState<null | HTMLElement>(null)
   const [basebandRestarting, setBasebandRestarting] = useState(false)
   const [basebandProgressOpen, setBasebandProgressOpen] = useState(false)
   const [basebandSteps, setBasebandSteps] = useState<BasebandRestartStep[]>([])
@@ -238,16 +225,6 @@ export default function TopBar({
     }
   }
 
-  const handleRefreshIntervalChange = (interval: number) => {
-    onRefreshIntervalChange(interval)
-    setRefreshMenuAnchor(null)
-  }
-
-  const getRefreshLabel = () => {
-    if (refreshInterval === 0) return '手动'
-    return `${refreshInterval / 1000}秒`
-  }
-
   return (
     <AppBar
       position="static"
@@ -275,7 +252,7 @@ export default function TopBar({
             bgcolor: 'transparent',
             '&:hover': {
               borderColor: 'divider',
-              bgcolor: (theme) => theme.palette.mode === 'light' ? 'rgba(255,255,255,0.62)' : 'rgba(30,41,59,0.82)',
+              bgcolor: (theme) => theme.palette.mode === 'light' ? 'rgba(255,255,255,0.62)' : 'rgba(30,30,30,0.82)',
             },
           }}
         >
@@ -318,41 +295,12 @@ export default function TopBar({
               </IconButton>
             </span>
           </Tooltip>
-          <IconButton color="default" onClick={(event) => setAnchorEl(event.currentTarget)} title="更多选项">
-            <MoreVertIcon />
-          </IconButton>
+          <Tooltip title={mode === 'dark' ? '切换到浅色模式' : '切换到深色模式'}>
+            <IconButton color="default" onClick={toggleTheme}>
+              {mode === 'dark' ? <LightModeIcon /> : <DarkModeIcon />}
+            </IconButton>
+          </Tooltip>
         </Box>
-
-        <Menu anchorEl={anchorEl} open={Boolean(anchorEl)} onClose={() => setAnchorEl(null)} PaperProps={{ sx: { minWidth: 200, mt: 1 } }}>
-          <MenuItem
-            onClick={() => {
-              toggleTheme()
-              setAnchorEl(null)
-            }}
-          >
-            <ListItemIcon>
-              {mode === 'dark' ? <LightModeIcon fontSize="small" /> : <DarkModeIcon fontSize="small" />}
-            </ListItemIcon>
-            <ListItemText>{mode === 'dark' ? '浅色模式' : '深色模式'}</ListItemText>
-          </MenuItem>
-          <Divider />
-          <MenuItem onClick={(event) => setRefreshMenuAnchor(event.currentTarget)}>
-            <ListItemIcon><SpeedIcon fontSize="small" /></ListItemIcon>
-            <ListItemText primary="刷新频率" secondary={getRefreshLabel()} secondaryTypographyProps={{ variant: 'caption' }} />
-          </MenuItem>
-        </Menu>
-
-        <Menu anchorEl={refreshMenuAnchor} open={Boolean(refreshMenuAnchor)} onClose={() => setRefreshMenuAnchor(null)}>
-          {[1000, 3000, 5000, 10000].map((interval) => (
-            <MenuItem key={interval} selected={refreshInterval === interval} onClick={() => handleRefreshIntervalChange(interval)}>
-              {interval / 1000}秒/次
-            </MenuItem>
-          ))}
-          <Divider />
-          <MenuItem selected={refreshInterval === 0} onClick={() => handleRefreshIntervalChange(0)}>
-            手动刷新
-          </MenuItem>
-        </Menu>
 
         <Dialog open={basebandProgressOpen} onClose={() => { if (!basebandRestarting) setBasebandProgressOpen(false) }} maxWidth="xs" fullWidth>
           <DialogTitle>重启基带</DialogTitle>

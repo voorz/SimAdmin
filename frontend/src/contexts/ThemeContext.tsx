@@ -45,14 +45,14 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
     palette: {
       mode,
       primary: {
-        main: mode === 'light' ? '#1296db' : '#42b7f5',
-        light: mode === 'light' ? '#4bb7ea' : '#7cd0ff',
-        dark: mode === 'light' ? '#0d7fba' : '#1296db',
+        main: mode === 'light' ? '#1a1a1a' : '#e5e5e5',
+        light: mode === 'light' ? '#4a4a4a' : '#f5f5f5',
+        dark: mode === 'light' ? '#000000' : '#b5b5b5',
       },
       secondary: {
-        main: mode === 'light' ? '#7c3aed' : '#a78bfa',
-        light: mode === 'light' ? '#a78bfa' : '#c4b5fd',
-        dark: mode === 'light' ? '#6d28d9' : '#8b5cf6',
+        main: mode === 'light' ? '#6a6a6a' : '#9a9a9a',
+        light: mode === 'light' ? '#9a9a9a' : '#c0c0c0',
+        dark: mode === 'light' ? '#4a4a4a' : '#6a6a6a',
       },
       success: {
         main: mode === 'light' ? '#2aae67' : '#66bb6a',
@@ -76,15 +76,15 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
         dark: mode === 'light' ? '#01579b' : '#0277bd',
       },
       background: {
-        default: mode === 'light' ? '#f8fafc' : '#07111f',
-        paper: mode === 'light' ? 'rgba(255,255,255,0.72)' : 'rgba(15,23,42,0.72)',
+        default: mode === 'light' ? '#f5f5f5' : '#1a1a1a',
+        paper: mode === 'light' ? 'rgba(255,255,255,0.72)' : 'rgba(30,30,30,0.72)',
       },
       text: {
         primary: mode === 'light' ? '#0f172a' : '#e5edf7',
         secondary: mode === 'light' ? '#475569' : '#94a3b8',
         disabled: mode === 'light' ? '#94a3b8' : '#64748b',
       },
-      divider: mode === 'light' ? 'rgba(148,163,184,0.22)' : 'rgba(148,163,184,0.18)',
+      divider: mode === 'light' ? 'rgba(0,0,0,0.12)' : 'rgba(255,255,255,0.12)',
     },
     typography: {
       fontFamily: [
@@ -120,15 +120,15 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
             margin: 0,
             minWidth: 320,
             minHeight: '100vh',
-            backgroundColor: mode === 'light' ? '#f8fafc' : '#07111f',
-            scrollbarColor: mode === 'dark' ? '#475569 transparent' : '#cbd5e1 transparent',
+            backgroundColor: mode === 'light' ? '#f5f5f5' : '#1a1a1a',
+            scrollbarColor: mode === 'dark' ? '#4a4a4a transparent' : '#c0c0c0 transparent',
             '&::-webkit-scrollbar, & *::-webkit-scrollbar': {
               width: 6,
               height: 6,
             },
             '&::-webkit-scrollbar-thumb, & *::-webkit-scrollbar-thumb': {
               borderRadius: 999,
-              backgroundColor: mode === 'dark' ? '#475569' : '#cbd5e1',
+              backgroundColor: mode === 'dark' ? '#4a4a4a' : '#c0c0c0',
             },
             '&::-webkit-scrollbar-track, & *::-webkit-scrollbar-track': {
               backgroundColor: 'transparent',
@@ -147,11 +147,11 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
           root: {
             borderRadius: 12,
             backgroundImage: 'none',
-            backgroundColor: mode === 'light' ? 'rgba(255,255,255,0.68)' : 'rgba(15,23,42,0.72)',
-            border: mode === 'light' ? '1px solid rgba(255,255,255,0.82)' : '1px solid rgba(148,163,184,0.18)',
+            backgroundColor: mode === 'light' ? 'rgba(255,255,255,0.68)' : 'rgba(30,30,30,0.72)',
+            border: mode === 'light' ? '1px solid rgba(255,255,255,0.82)' : '1px solid rgba(255,255,255,0.12)',
             boxShadow: mode === 'light'
-              ? '0 18px 42px -28px rgba(15,23,42,0.28), 0 1px 0 rgba(255,255,255,0.8) inset'
-              : '0 18px 42px -30px rgba(0,0,0,0.72), 0 1px 0 rgba(255,255,255,0.08) inset',
+              ? '0 18px 42px -28px rgba(0,0,0,0.18), 0 1px 0 rgba(255,255,255,0.8) inset'
+              : '0 18px 42px -30px rgba(0,0,0,0.72), 0 1px 0 rgba(255,255,255,0.06) inset',
             backdropFilter: 'blur(22px)',
             WebkitBackdropFilter: 'blur(22px)',
           },
@@ -174,8 +174,8 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
           root: {
             borderRadius: 12,
             backgroundImage: 'none',
-            backgroundColor: mode === 'light' ? 'rgba(255,255,255,0.66)' : 'rgba(15,23,42,0.68)',
-            borderColor: mode === 'light' ? 'rgba(226,232,240,0.75)' : 'rgba(148,163,184,0.18)',
+            backgroundColor: mode === 'light' ? 'rgba(255,255,255,0.66)' : 'rgba(30,30,30,0.68)',
+            borderColor: mode === 'light' ? 'rgba(226,232,240,0.75)' : 'rgba(255,255,255,0.12)',
             backdropFilter: 'blur(20px)',
             WebkitBackdropFilter: 'blur(20px)',
           },

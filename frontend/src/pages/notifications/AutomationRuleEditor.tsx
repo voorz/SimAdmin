@@ -94,7 +94,7 @@ export default function AutomationRuleEditor({ eventCodes, onChange }: Automatio
                 height: '100%',
                 display: 'flex',
                 flexDirection: 'column',
-                bgcolor: (theme) => theme.palette.mode === 'light' ? 'rgba(255,255,255,0.48)' : 'rgba(30,41,59,0.2)',
+                bgcolor: (theme) => theme.palette.mode === 'light' ? 'rgba(255,255,255,0.48)' : 'rgba(30,30,30,0.2)',
                 borderColor: 'divider',
               }}
             >

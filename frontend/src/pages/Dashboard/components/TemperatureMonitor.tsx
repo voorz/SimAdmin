@@ -39,7 +39,7 @@ export function TemperatureMonitor({ systemStats }: TemperatureMonitorProps) {
                         width: 96,
                         height: 6,
                         borderRadius: 999,
-                        bgcolor: theme.palette.mode === 'light' ? 'rgba(255,255,255,0.62)' : 'rgba(30,41,59,0.72)',
+                        bgcolor: theme.palette.mode === 'light' ? 'rgba(255,255,255,0.62)' : 'rgba(30,30,30,0.72)',
                         overflow: 'hidden',
                       }}
                     >

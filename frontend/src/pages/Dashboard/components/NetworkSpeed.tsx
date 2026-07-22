@@ -115,7 +115,7 @@ export function NetworkSpeed({ systemStats, speedHistory }: NetworkSpeedProps) {
                 sx={{
                   minHeight: 32,
                   maxWidth: '100%',
-                  bgcolor: (currentTheme) => currentTheme.palette.mode === 'light' ? 'rgba(241,245,249,0.72)' : 'rgba(15,23,42,0.36)',
+                  bgcolor: (currentTheme) => currentTheme.palette.mode === 'light' ? 'rgba(241,245,249,0.72)' : 'rgba(30,30,30,0.36)',
                   borderRadius: 1.5,
                   p: 0.35,
                   '& .MuiTabs-indicator': { display: 'none' },
@@ -129,7 +129,7 @@ export function NetworkSpeed({ systemStats, speedHistory }: NetworkSpeedProps) {
                   },
                   '& .Mui-selected': {
                     bgcolor: 'background.paper',
-                    boxShadow: '0 8px 18px -14px rgba(15,23,42,0.5)',
+                    boxShadow: '0 8px 18px -14px rgba(0,0,0,0.5)',
                   },
                 }}
               >

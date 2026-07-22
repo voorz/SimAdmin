@@ -1,4 +1,4 @@
-import { useMemo, type ElementType } from 'react'
+import { type ElementType } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import {
   Box,
@@ -11,7 +11,6 @@ import {
   Toolbar,
   Tooltip,
   Typography,
-  Divider,
 } from '@mui/material'
 import {
   Dashboard as DashboardIcon,
@@ -38,55 +37,23 @@ interface SidebarProps {
   isMobile: boolean
 }
 
-interface DirectMenuItem {
-  type: 'direct'
+interface MenuItem {
   path: string
   label: string
   icon: ElementType
 }
 
-interface GroupMenuItem {
-  type: 'group'
-  label: string
-  items: Array<{
-    path: string
-    label: string
-    icon: ElementType
-  }>
-}
-
-type MenuConfigItem = DirectMenuItem | GroupMenuItem
-
-const menuGroups: MenuConfigItem[] = [
-  { type: 'direct', path: '/', label: '仪表盘', icon: DashboardIcon },
-  { type: 'direct', path: '/sim', label: 'SIM 卡', icon: SimIcon },
-  { type: 'direct', path: '/sms', label: '短信管理', icon: SmsIcon },
-  // { path: '/phone', label: '电话管理', icon: PhoneIcon },
-  {
-    type: 'group',
-    label: '网络',
-    items: [
-      { path: '/network', label: '蜂窝网络', icon: SignalIcon },
-      { path: '/device-network', label: '设备网络', icon: RouterIcon },
-    ],
-  },
-  {
-    type: 'group',
-    label: '自动化与通知',
-    items: [
-      { path: '/automation', label: '自动化中心', icon: AutomationIcon },
-      { path: '/notifications', label: '通知中心', icon: NotificationsIcon },
-    ],
-  },
-  {
-    type: 'group',
-    label: '系统',
-    items: [
-      { path: '/config', label: '基本配置', icon: SettingsIcon },
-      { path: '/config/security', label: '安全性', icon: SecurityIcon },
-      { path: '/ota', label: 'OTA 更新', icon: OtaIcon },
-    ],
-  },
+const menuItems: MenuItem[] = [
+  { path: '/', label: '仪表盘', icon: DashboardIcon },
+  { path: '/sim', label: 'SIM 卡', icon: SimIcon },
+  { path: '/sms', label: '短信管理', icon: SmsIcon },
+  { path: '/network', label: '蜂窝网络', icon: SignalIcon },
+  { path: '/device-network', label: '设备网络', icon: RouterIcon },
+  { path: '/automation', label: '自动化中心', icon: AutomationIcon },
+  { path: '/notifications', label: '通知中心', icon: NotificationsIcon },
+  { path: '/config', label: '基本配置', icon: SettingsIcon },
+  { path: '/config/security', label: '安全性', icon: SecurityIcon },
+  { path: '/ota', label: 'OTA 更新', icon: OtaIcon },
 ]
 
 export default function Sidebar({
@@ -99,31 +66,6 @@ export default function Sidebar({
 }: SidebarProps) {
   const navigate = useNavigate()
   const location = useLocation()
-
-  const directItems = useMemo(() => {
-    return menuGroups.filter((item): item is DirectMenuItem => item.type === 'direct')
-  }, [])
-
-  const groupItems = useMemo(() => {
-    return menuGroups.filter((item): item is GroupMenuItem => item.type === 'group')
-  }, [])
-
-  const groupSubItems = useMemo(() => {
-    const list: Array<{ path: string; label: string; icon: ElementType; parentLabel: string }> = []
-    for (const group of menuGroups) {
-      if (group.type === 'group') {
-        for (const subItem of group.items) {
-          list.push({
-            path: subItem.path,
-            label: subItem.label,
-            icon: subItem.icon,
-            parentLabel: group.label,
-          })
-        }
-      }
-    }
-    return list
-  }, [])
 
   const handleNavigation = (path: string): void => {
     void navigate(path)
@@ -179,234 +121,87 @@ export default function Sidebar({
         </Box>
       </Toolbar>
       <List sx={{ flexGrow: 1, py: 1.5, px: compact ? 0.75 : 1, overflowY: 'auto', overflowX: 'hidden' }}>
-        {compact ? (
-          <>
-            {/* Top Direct Items (Compact) */}
-            {directItems.map((item) => {
-              const selected = location.pathname === item.path
-              const IconComponent = item.icon
-              return (
-                <ListItem key={item.path} disablePadding>
-                  <Tooltip title={item.label} placement="right">
-                    <ListItemButton
-                      selected={selected}
-                      onClick={() => handleNavigation(item.path)}
-                      sx={{
-                        minHeight: 44,
-                        borderRadius: 1.5,
-                        justifyContent: 'center',
-                        px: 0,
-                        mb: 0.5,
-                        color: selected ? 'primary.main' : 'text.secondary',
-                        '&.Mui-selected': {
-                          bgcolor: (theme) => theme.palette.mode === 'light' ? 'rgba(255,255,255,0.68)' : 'rgba(30,41,59,0.72)',
-                          boxShadow: '0 8px 22px -18px rgba(18,150,219,0.6)',
-                          borderRight: '2px solid',
-                          borderColor: 'primary.main',
-                        },
-                        '&.Mui-selected:hover, &:hover': {
-                          bgcolor: (theme) => theme.palette.mode === 'light' ? 'rgba(255,255,255,0.58)' : 'rgba(30,41,59,0.64)',
-                        },
-                      }}
-                    >
-                      <ListItemIcon
-                        sx={{
-                          minWidth: 0,
-                          color: 'inherit',
-                          justifyContent: 'center',
-                        }}
-                      >
-                        <IconComponent sx={{ fontSize: 20 }} />
-                      </ListItemIcon>
-                    </ListItemButton>
-                  </Tooltip>
-                </ListItem>
-              )
-            })}
-
-            {/* Non-full-width Divider (Compact) */}
-            <ListItem disablePadding sx={{ my: 1, px: 1 }}>
-              <Divider
-                variant="middle"
-                sx={{
-                  width: '100%',
-                  borderColor: (theme) => theme.palette.mode === 'light' ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.06)',
-                }}
-              />
-            </ListItem>
-
-            {/* Bottom Grouped Items (Compact) */}
-            {groupSubItems.map((item) => {
-              const selected = location.pathname === item.path
-              const IconComponent = item.icon
-              return (
-                <ListItem key={item.path} disablePadding>
-                  <Tooltip title={`${item.parentLabel} / ${item.label}`} placement="right">
-                    <ListItemButton
-                      selected={selected}
-                      onClick={() => handleNavigation(item.path)}
-                      sx={{
-                        minHeight: 44,
-                        borderRadius: 1.5,
-                        justifyContent: 'center',
-                        px: 0,
-                        mb: 0.5,
-                        color: selected ? 'primary.main' : 'text.secondary',
-                        '&.Mui-selected': {
-                          bgcolor: (theme) => theme.palette.mode === 'light' ? 'rgba(255,255,255,0.68)' : 'rgba(30,41,59,0.72)',
-                          boxShadow: '0 8px 22px -18px rgba(18,150,219,0.6)',
-                          borderRight: '2px solid',
-                          borderColor: 'primary.main',
-                        },
-                        '&.Mui-selected:hover, &:hover': {
-                          bgcolor: (theme) => theme.palette.mode === 'light' ? 'rgba(255,255,255,0.58)' : 'rgba(30,41,59,0.64)',
-                        },
-                      }}
-                    >
-                      <ListItemIcon
-                        sx={{
-                          minWidth: 0,
-                          color: 'inherit',
-                          justifyContent: 'center',
-                        }}
-                      >
-                        <IconComponent sx={{ fontSize: 20 }} />
-                      </ListItemIcon>
-                    </ListItemButton>
-                  </Tooltip>
-                </ListItem>
-              )
-            })}
-          </>
-        ) : (
-          <>
-            {/* Top Direct Items (Expanded) */}
-            {directItems.map((group) => {
-              const selected = location.pathname === group.path
-              const IconComponent = group.icon
-              return (
-                <ListItem key={group.path} disablePadding>
+        {menuItems.map((item) => {
+          const selected = location.pathname === item.path
+          const IconComponent = item.icon
+          return (
+            <ListItem key={item.path} disablePadding>
+              {compact ? (
+                <Tooltip title={item.label} placement="right">
                   <ListItemButton
                     selected={selected}
-                    onClick={() => handleNavigation(group.path)}
+                    onClick={() => handleNavigation(item.path)}
                     sx={{
                       minHeight: 44,
                       borderRadius: 1.5,
-                      justifyContent: 'flex-start',
+                      justifyContent: 'center',
                       px: 0,
                       mb: 0.5,
                       color: selected ? 'primary.main' : 'text.secondary',
                       '&.Mui-selected': {
-                        bgcolor: (theme) => theme.palette.mode === 'light' ? 'rgba(255,255,255,0.68)' : 'rgba(30,41,59,0.72)',
+                        bgcolor: (theme) => theme.palette.mode === 'light' ? 'rgba(255,255,255,0.68)' : 'rgba(30,30,30,0.72)',
                         boxShadow: '0 8px 22px -18px rgba(18,150,219,0.6)',
                         borderRight: '2px solid',
                         borderColor: 'primary.main',
                       },
                       '&.Mui-selected:hover, &:hover': {
-                        bgcolor: (theme) => theme.palette.mode === 'light' ? 'rgba(255,255,255,0.58)' : 'rgba(30,41,59,0.64)',
+                        bgcolor: (theme) => theme.palette.mode === 'light' ? 'rgba(255,255,255,0.58)' : 'rgba(30,30,30,0.64)',
                       },
                     }}
                   >
                     <ListItemIcon
                       sx={{
-                        minWidth: 38,
-                        width: 48,
+                        minWidth: 0,
                         color: 'inherit',
                         justifyContent: 'center',
-                        flexShrink: 0,
                       }}
                     >
                       <IconComponent sx={{ fontSize: 20 }} />
                     </ListItemIcon>
-                    <ListItemText
-                      primary={group.label}
-                      primaryTypographyProps={{ noWrap: true, fontSize: 14, fontWeight: selected ? 700 : 500 }}
-                    />
                   </ListItemButton>
-                </ListItem>
-              )
-            })}
-
-            {/* Non-full-width Divider (Expanded) */}
-            <ListItem disablePadding sx={{ my: 1 }}>
-              <Divider
-                variant="middle"
-                sx={{
-                  width: '100%',
-                  borderColor: (theme) => theme.palette.mode === 'light' ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.06)',
-                }}
-              />
-            </ListItem>
-
-            {/* Bottom Grouped Items (Expanded) */}
-            {groupItems.map((group, index) => (
-              <Box key={group.label} sx={{ mt: index === 0 ? 3 : 2.5, mb: 0.5 }}>
-                <Typography
-                  variant="caption"
-                  color="text.disabled"
+                </Tooltip>
+              ) : (
+                <ListItemButton
+                  selected={selected}
+                  onClick={() => handleNavigation(item.path)}
                   sx={{
-                    px: 2,
-                    display: 'block',
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.08em',
-                    fontSize: '0.7rem',
-                    mb: 0.75,
+                    minHeight: 44,
+                    borderRadius: 1.5,
+                    justifyContent: 'flex-start',
+                    px: 0,
+                    mb: 0.5,
+                    color: selected ? 'primary.main' : 'text.secondary',
+                    '&.Mui-selected': {
+                      bgcolor: (theme) => theme.palette.mode === 'light' ? 'rgba(255,255,255,0.68)' : 'rgba(30,30,30,0.72)',
+                      boxShadow: '0 8px 22px -18px rgba(18,150,219,0.6)',
+                      borderRight: '2px solid',
+                      borderColor: 'primary.main',
+                    },
+                    '&.Mui-selected:hover, &:hover': {
+                      bgcolor: (theme) => theme.palette.mode === 'light' ? 'rgba(255,255,255,0.58)' : 'rgba(30,30,30,0.64)',
+                    },
                   }}
                 >
-                  {group.label}
-                </Typography>
-                <List disablePadding sx={{ pl: 0.5 }}>
-                  {group.items.map((subItem) => {
-                    const selected = location.pathname === subItem.path
-                    const SubIconComponent = subItem.icon
-                    return (
-                      <ListItem key={subItem.path} disablePadding>
-                        <ListItemButton
-                          selected={selected}
-                          onClick={() => handleNavigation(subItem.path)}
-                          sx={{
-                            minHeight: 44,
-                            borderRadius: 1.5,
-                            justifyContent: 'flex-start',
-                            px: 0,
-                            mb: 0.5,
-                            color: selected ? 'primary.main' : 'text.secondary',
-                            '&.Mui-selected': {
-                              bgcolor: (theme) => theme.palette.mode === 'light' ? 'rgba(255,255,255,0.68)' : 'rgba(30,41,59,0.72)',
-                              boxShadow: '0 8px 22px -18px rgba(18,150,219,0.6)',
-                              borderRight: '2px solid',
-                              borderColor: 'primary.main',
-                            },
-                            '&.Mui-selected:hover, &:hover': {
-                              bgcolor: (theme) => theme.palette.mode === 'light' ? 'rgba(255,255,255,0.58)' : 'rgba(30,41,59,0.64)',
-                            },
-                          }}
-                        >
-                          <ListItemIcon
-                            sx={{
-                              minWidth: 38,
-                              width: 48,
-                              color: 'inherit',
-                              justifyContent: 'center',
-                              flexShrink: 0,
-                            }}
-                          >
-                            <SubIconComponent sx={{ fontSize: 20 }} />
-                          </ListItemIcon>
-                          <ListItemText
-                            primary={subItem.label}
-                            primaryTypographyProps={{ noWrap: true, fontSize: 14, fontWeight: selected ? 700 : 500 }}
-                          />
-                        </ListItemButton>
-                      </ListItem>
-                    )
-                  })}
-                </List>
-              </Box>
-            ))}
-          </>
-        )}
+                  <ListItemIcon
+                    sx={{
+                      minWidth: 38,
+                      width: 48,
+                      color: 'inherit',
+                      justifyContent: 'center',
+                      flexShrink: 0,
+                    }}
+                  >
+                    <IconComponent sx={{ fontSize: 20 }} />
+                  </ListItemIcon>
+                  <ListItemText
+                    primary={item.label}
+                    primaryTypographyProps={{ noWrap: true, fontSize: 14, fontWeight: selected ? 700 : 500 }}
+                  />
+                </ListItemButton>
+              )}
+            </ListItem>
+          )
+        })}
       </List>
 
       <Box
@@ -474,8 +269,8 @@ export default function Sidebar({
     borderRadius: 0,
     borderRight: '1px solid',
     borderColor: 'divider',
-    bgcolor: (theme: import('@mui/material').Theme) => theme.palette.mode === 'light' ? 'rgba(255,255,255,0.42)' : 'rgba(15,23,42,0.54)',
-    boxShadow: '4px 0 24px -16px rgba(15,23,42,0.28)',
+    bgcolor: (theme: import('@mui/material').Theme) => theme.palette.mode === 'light' ? 'rgba(255,255,255,0.42)' : 'rgba(30,30,30,0.54)',
+    boxShadow: '4px 0 24px -16px rgba(0,0,0,0.18)',
     backdropFilter: 'blur(28px)',
     WebkitBackdropFilter: 'blur(28px)',
   } as const

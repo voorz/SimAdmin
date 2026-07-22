@@ -1,7 +1,7 @@
 import { Box, Card, CardContent, LinearProgress, SvgIcon, Typography, useTheme, type Theme } from '@mui/material'
 import Grid from '@mui/material/Grid'
 import { Memory, Speed as CpuIcon, Storage, Thermostat } from '@mui/icons-material'
-import { formatBytes, getCpuColor, getMemoryColor, getTempPercent, getTempBarColor, generateHeatmapGradient } from '../utils'
+import { formatBytes, getCpuColor, getMemoryColor, getTempPercent, getTempBarColor } from '../utils'
 import type { SystemStatsResponse, ThermalZone } from '@/api/types'
 
 interface SystemResourcesProps {
@@ -43,10 +43,10 @@ function CpuChipIcon() {
   )
 }
 
-function resourceGradient(start: string, end: string) {
+function resourceSolidColor(color: string) {
   return {
     '& .MuiLinearProgress-bar': {
-      backgroundImage: `linear-gradient(90deg, ${start}, ${end})`,
+      backgroundColor: color,
       borderRadius: 999,
     },
   }
@@ -108,27 +108,22 @@ export function SystemResources({ systemStats }: SystemResourcesProps) {
   const coldestSensor = sortedTemperatureSensors.length > 0 ? sortedTemperatureSensors[sortedTemperatureSensors.length - 1] : null
   const hottestPercent = hottestSensor ? getTempPercent(hottestSensor.temperature) : 0
   const hottestColor = hottestSensor ? getTempBarColor(hottestSensor.temperature) : getTempBarColor(0)
-  const temperatureGradientSize = hottestPercent > 0 ? `${10000 / hottestPercent}% 100%` : '100% 100%'
-
+  
   const progressSx = {
     height: 10,
     borderRadius: 999,
-    bgcolor: theme.palette.mode === 'light' ? 'rgba(226,232,240,0.72)' : 'rgba(30,41,59,0.72)',
+    bgcolor: theme.palette.mode === 'light' ? 'rgba(226,232,240,0.72)' : 'rgba(30,30,30,0.72)',
   }
-  const cpuProgressSx = { ...progressSx, ...resourceGradient('#34d399', '#10b981') }
-  const memoryProgressSx = { ...progressSx, ...resourceGradient('#60a5fa', '#1296db') }
-  const diskProgressSx = { ...progressSx, ...resourceGradient('#a78bfa', '#8b5cf6') }
+  const cpuProgressSx = { ...progressSx, ...resourceSolidColor('#10b981') }
+  const memoryProgressSx = { ...progressSx, ...resourceSolidColor('#1296db') }
+  const diskProgressSx = { ...progressSx, ...resourceSolidColor('#8b5cf6') }
   const temperatureProgressSx = {
     ...progressSx,
     '& .MuiLinearProgress-bar': {
       width: `${hottestPercent}%`,
-      backgroundImage: hottestSensor ? generateHeatmapGradient() : 'none',
-      backgroundSize: temperatureGradientSize,
-      backgroundPosition: 'left center',
-      bgcolor: hottestSensor ? getTempBarColor(0) : theme.palette.action.disabled,
+      backgroundColor: hottestSensor ? hottestColor : theme.palette.action.disabled,
       borderRadius: 999,
       transform: 'none !important',
-      boxShadow: hottestSensor ? `0 0 10px ${hottestColor}55` : 'none',
     },
   }
 

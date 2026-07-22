@@ -47,9 +47,6 @@ export default function MainLayout() {
             inset: 0,
             pointerEvents: 'none',
             zIndex: 0,
-            background: (currentTheme) => currentTheme.palette.mode === 'light'
-              ? 'radial-gradient(circle at 6% 2%, rgba(147,197,253,0.48), transparent 32%), radial-gradient(circle at 96% 24%, rgba(196,181,253,0.36), transparent 34%), radial-gradient(circle at 42% 106%, rgba(110,231,183,0.28), transparent 34%)'
-              : 'radial-gradient(circle at 8% 0%, rgba(18,150,219,0.26), transparent 34%), radial-gradient(circle at 98% 24%, rgba(124,58,237,0.24), transparent 34%), radial-gradient(circle at 42% 110%, rgba(16,185,129,0.16), transparent 36%)',
           },
         }}
       >
@@ -80,16 +77,14 @@ export default function MainLayout() {
           <TopBar
             drawerWidth={desktopOpen ? DRAWER_WIDTH : DRAWER_MINI_WIDTH}
             onMenuClick={handleDrawerToggle}
-            refreshInterval={refreshInterval}
-            onRefreshIntervalChange={setRefreshInterval}
           />
 
           <Box
             sx={{
               borderBottom: '1px solid',
               borderColor: (currentTheme) => currentTheme.palette.mode === 'light'
-                ? 'rgba(226,232,240,0.6)'
-                : 'rgba(148,163,184,0.16)',
+                ? 'rgba(0,0,0,0.08)'
+                : 'rgba(255,255,255,0.1)',
               flexShrink: 0,
             }}
           />
@@ -119,8 +114,8 @@ export default function MainLayout() {
                 bgcolor: 'transparent',
                 borderTop: '1px solid',
                 borderColor: currentTheme.palette.mode === 'light'
-                  ? 'rgba(226,232,240,0.72)'
-                  : 'rgba(148,163,184,0.18)',
+                  ? 'rgba(0,0,0,0.08)'
+                  : 'rgba(255,255,255,0.1)',
                 display: 'flex',
                 height: LAYOUT_BOTTOM_ACTION_BAR_HEIGHT,
                 minHeight: LAYOUT_BOTTOM_ACTION_BAR_HEIGHT,
