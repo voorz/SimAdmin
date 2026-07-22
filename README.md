@@ -28,7 +28,7 @@ Health checks are designed for Linux cellular devices with ModemManager support.
 
 ### Quick Start
 
-> Auto-detects architecture (arm64 / amd64), installs system dependencies, configures systemd service — all in one command.
+> Auto-detects architecture (arm64 / amd64 or WSL), installs system dependencies, configures systemd service — all in one command.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/voorz/SimAdmin/main/install_latest.sh | sh

@@ -889,12 +889,33 @@ main() {
 
   echo "==> starting service"
   systemctl restart "${SERVICE_NAME}.service"
+  sleep 1
 
-  echo "==> done"
-  echo "    service: ${SERVICE_NAME}.service"
-  echo "    modem recovery: simadmin-modem-recovery.service"
-  echo "    install dir: ${INSTALL_DIR}"
-  systemctl status "${SERVICE_NAME}.service" --no-pager
+  # Get installed version
+  installed_version="$("${INSTALL_DIR}/simadmin" --version 2>/dev/null || echo 'unknown')"
+
+  echo ""
+  echo "========================================"
+  echo "  SimAdmin installed successfully!"
+  echo "========================================"
+  echo "  Version:     ${installed_version}"
+  echo "  Install dir: ${INSTALL_DIR}"
+  echo "  Service:     ${SERVICE_NAME}.service"
+  echo "  Modem recovery: simadmin-modem-recovery.service"
+  echo "  Web UI:      http://$(hostname -I 2>/dev/null | awk '{print $1}' || echo 'localhost'):3000"
+  echo "----------------------------------------"
+  echo "  Next steps:"
+  echo "    1. Open the Web UI in your browser"
+  echo "    2. Set up admin password on first launch"
+  echo "    3. Manage SIM, network, SMS, and OTA"
+  echo "----------------------------------------"
+  echo "  Logs:     journalctl -u ${SERVICE_NAME} -f"
+  echo "  Stop:     systemctl stop ${SERVICE_NAME}"
+  echo "  Restart:  systemctl restart ${SERVICE_NAME}"
+  echo "  Uninstall: curl -fsSL https://raw.githubusercontent.com/${REPO}/main/uninstall.sh | sh"
+  echo "========================================"
+  echo ""
+  systemctl is-active --quiet "${SERVICE_NAME}.service" && echo "Service status: ACTIVE (running)" || echo "Service status: WARNING (not running)"
 }
 
 main "$@"
