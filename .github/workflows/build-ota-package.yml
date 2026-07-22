@@ -280,22 +280,8 @@ jobs:
             > This is why Debian/Ubuntu (which ship these services by default) are the primary targets.
             > Distributions without these services (e.g. OpenWrt, Alpine) require significant adaptation.
 
-            ### Installation
+            ### Quick Install
 
-            ```bash
-            # Download the matching package for your architecture
-            # arm64 (ARM64 devices)
-            wget https://github.com/voorz/SimAdmin/releases/download/v${{ steps.version.outputs.version }}/${{ steps.checksums.outputs.aarch64_file }}
-
-            # amd64 (servers, WSL)
-            wget https://github.com/voorz/SimAdmin/releases/download/v${{ steps.version.outputs.version }}/${{ steps.checksums.outputs.x86_64_file }}
-
-            # Upload to device and apply via web UI (/ota), or:
-            curl -X POST http://<device-ip>:3000/api/ota/upload -F "file=@<package>.tar.gz"
-            curl -X POST http://<device-ip>:3000/api/ota/apply
-            ```
-
-            Or use the one-click install script:
             ```bash
             curl -fsSL https://raw.githubusercontent.com/voorz/SimAdmin/main/install_latest.sh | sh
             ```
