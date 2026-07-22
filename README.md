@@ -26,6 +26,19 @@ The project consists of a Rust backend and a React frontend:
 
 Health checks are designed for Linux cellular devices with ModemManager support. Different modem firmware, kernels, and ModemManager versions expose different capabilities — actual features depend on your hardware.
 
+### Quick Start
+
+> Auto-detects architecture (arm64 / amd64), installs system dependencies, configures systemd service — all in one command.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/voorz/SimAdmin/main/install_latest.sh | sh
+```
+
+- **Target archs**: `aarch64-unknown-linux-musl` / `x86_64-unknown-linux-musl` (static binary, no glibc dependency)
+- **Install path**: `/opt/simadmin/` (binary + `www/` + `data.db`)
+- **Service**: `systemd` (`simadmin.service`)
+- **Access**: `http://<device-ip>:3000`
+
 ## Documentation
 
 - **[Installation & Deployment](./docs/install.md)** — One-click install/uninstall, default access address, and initial admin password setup.
@@ -133,85 +146,6 @@ sequenceDiagram
 - [Rust](https://rustup.rs/) (stable toolchain)
 - [Node.js](https://nodejs.org/) 20+ and [pnpm](https://pnpm.io/) 9
 - System D-Bus, ModemManager, NetworkManager (for hardware interaction)
-
-### Run Dev Servers
-
-```bash
-# Terminal 1 — backend (port 3000)
-cd backend
-cargo run -- --host :: --port 3000
-
-# Terminal 2 — frontend (port 5173, proxies /api to :3000)
-cd frontend
-pnpm install
-pnpm dev
-```
-
-> On dev machines without modem hardware, `/api/*` hardware calls will return errors — this is expected.
-
-### Build OTA Package
-
-```bash
-# Push a v* tag to trigger GitHub Actions CI build
-# CI builds both arm64 and amd64 targets
-git tag v1.1.6-4
-git push origin v1.1.6-4
-
-# Or build locally (requires Linux/WSL2 with cross-compilation toolchain)
-./scripts/build.sh
-```
-
-CI cross-compiles to `aarch64-unknown-linux-musl` and `x86_64-unknown-linux-musl` (static binaries), optionally UPX-compresses, and publishes a GitHub Release with `simadmin_v<version>_linux_arm64.tar.gz` and `simadmin_v<version>_linux_amd64.tar.gz`.
-
-### Deploy on WSL (Debian)
-
-WSL provides a lightweight Linux environment for development and testing.
-
-```bash
-# 1. Install system dependencies
-sudo apt-get update
-sudo apt-get install -y dbus modemmanager network-manager wget curl
-
-# 2. Download the matching package for your architecture
-#    WSL is typically x86_64 (amd64)
-wget https://github.com/voorz/SimAdmin/releases/latest/download/simadmin_v1.1.6-4_linux_amd64.tar.gz
-
-# 3. Extract to /opt/simadmin
-sudo mkdir -p /opt/simadmin
-sudo tar -xzf simadmin_v1.1.6-4_linux_amd64.tar.gz -C /opt/simadmin
-
-# 4. Install systemd service
-sudo curl -fsSL https://raw.githubusercontent.com/voorz/SimAdmin/main/scripts/simadmin.service \
-  -o /etc/systemd/system/simadmin.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now simadmin
-
-# 5. Verify
-systemctl status simadmin --no-pager
-curl -s http://localhost:3000/api/health
-```
-
-> **Note**: On WSL without modem hardware, `/api/*` hardware calls will return errors — this is expected. The web UI is fully functional for testing and development.
-
-### One-Click Install
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/voorz/SimAdmin/main/install_latest.sh | sh
-```
-
-### OTA Update
-
-Upload the matching package from [Releases](https://github.com/voorz/SimAdmin/releases) via the web UI (`/ota`), or:
-
-```bash
-curl -X POST http://<device-ip>:3000/api/ota/upload -F "file=@simadmin_v1.1.6-4_linux_amd64.tar.gz"
-curl -X POST http://<device-ip>:3000/api/ota/apply
-```
-
-- **Target archs**: `aarch64-unknown-linux-musl` / `x86_64-unknown-linux-musl` (static binary, no glibc dependency)
-- **Install path**: `/opt/simadmin/` (binary + `www/` + `data.db`)
-- **Service**: `systemd` (`simadmin.service`)
-- **Access**: `http://<device-ip>:3000`
 
 ## Disclaimer
 

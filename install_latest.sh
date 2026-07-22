@@ -774,11 +774,63 @@ install_lpac() {
 
 
 
+check_and_install_deps() {
+  missing=""
+  for dep in dbus ModemManager NetworkManager; do
+    if ! systemctl is-active --quiet "$dep" 2>/dev/null \
+       && ! systemctl is-enabled --quiet "$dep" 2>/dev/null; then
+      missing="$missing $dep"
+    fi
+  done
+
+  if [ -z "$missing" ]; then
+    return 0
+  fi
+
+  echo "==> missing system dependencies:$missing"
+
+  if [ -n "$SIMADMIN_SKIP_DEPS" ] && truthy "$SIMADMIN_SKIP_DEPS"; then
+    echo "    SIMADMIN_SKIP_DEPS=1, skipping"
+    return 0
+  fi
+
+  printf '    install now? [Y/n] '
+  read -r answer
+  case "$answer" in
+    n|N|no|NO|No)
+      echo "    skipped — service may not function correctly"
+      return 0
+      ;;
+  esac
+
+  if command -v apt-get >/dev/null 2>&1; then
+    apt-get update -qq
+    apt-get install -y -qq $missing
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y -q $missing
+  elif command -v yum >/dev/null 2>&1; then
+    yum install -y -q $missing
+  elif command -v apk >/dev/null 2>&1; then
+    apk add --quiet $missing
+  elif command -v pacman >/dev/null 2>&1; then
+    pacman -S --noconfirm --quiet $missing
+  else
+    echo "error: no supported package manager found (apt/dnf/yum/apk/pacman)" >&2
+    echo "       please install manually:$missing" >&2
+    return 1
+  fi
+
+  echo "    dependencies installed"
+}
+
+
 main() {
   require_root
   require_cmd curl
   require_cmd systemctl
   require_cmd mktemp
+
+  check_and_install_deps
 
   tmp_dir="$(mktemp -d)"
   trap 'rm -rf "$tmp_dir"' EXIT INT TERM
