@@ -30,14 +30,23 @@ LPAC_ASSET_URL="${LPAC_ASSET_URL:-}"
 
 require_root() {
   if [ "$(id -u)" -ne 0 ]; then
-    echo "error: please run as root" >&2
+    echo "错误: 请以 root 用户运行" >&2
     exit 1
   fi
 }
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
-    echo "error: missing required command: $1" >&2
+    echo "错误: 缺少必要命令: $1" >&2
+    case "$1" in
+      systemctl)
+        echo "       SimAdmin 需要 systemd 环境" >&2
+        echo "       OpenWrt (procd)、Alpine (OpenRC) 等系统不支持" >&2
+        ;;
+      curl)
+        echo "       请安装 curl: apt-get install curl / opkg install curl" >&2
+        ;;
+    esac
     exit 1
   fi
 }
@@ -181,13 +190,13 @@ download_release_asset() {
   primary_url="$2"
   fallback_url=""
 
-  echo "==> downloading release asset"
+  echo "==> 下载安装包"
   if download_with_proxies "$primary_url" "$archive_path"; then
     return 0
   fi
 
   if fallback_url="$(fallback_asset_url)" && [ "$fallback_url" != "$primary_url" ]; then
-    echo "==> latest asset alias download failed, trying versioned asset"
+    echo "==> latest 别名下载失败, 尝试使用版本号下载"
     if download_with_proxies "$fallback_url" "$archive_path"; then
       return 0
     fi
@@ -741,7 +750,7 @@ install_lpac() {
     LPAC_TARGET_RELEASE_VERSION="$(resolve_lpac_target_version "$lpac_url" || true)"
   fi
 
-  echo "==> installing lpac for ${lpac_arch} (${LPAC_INSTALL_REASON})"
+  echo "==> 安装 lpac (${lpac_arch}, ${LPAC_INSTALL_REASON})"
   if ! download_with_proxies "$lpac_url" "$lpac_archive"; then
     echo "warning: failed to download lpac, keeping existing lpac if present" >&2
     return 0
@@ -775,30 +784,36 @@ install_lpac() {
 
 
 check_and_install_deps() {
+  echo "==> 检查系统依赖"
+
   missing=""
   for dep in dbus ModemManager NetworkManager; do
-    if ! systemctl is-active --quiet "$dep" 2>/dev/null \
-       && ! systemctl is-enabled --quiet "$dep" 2>/dev/null; then
+    if systemctl is-active --quiet "$dep" 2>/dev/null \
+       || systemctl is-enabled --quiet "$dep" 2>/dev/null; then
+      echo "    [OK] $dep"
+    else
+      echo "    [缺失] $dep"
       missing="$missing $dep"
     fi
   done
 
   if [ -z "$missing" ]; then
+    echo "    所有依赖已就绪"
     return 0
   fi
 
-  echo "==> missing system dependencies:$missing"
+  echo "    缺少依赖:$missing"
 
   if [ -n "$SIMADMIN_SKIP_DEPS" ] && truthy "$SIMADMIN_SKIP_DEPS"; then
-    echo "    SIMADMIN_SKIP_DEPS=1, skipping"
+    echo "    SIMADMIN_SKIP_DEPS=1, 跳过安装"
     return 0
   fi
 
-  printf '    install now? [Y/n] '
+  printf '    现在安装? [Y/n] '
   read -r answer
   case "$answer" in
     n|N|no|NO|No)
-      echo "    skipped — service may not function correctly"
+      echo "    已跳过 — 服务可能无法正常工作"
       return 0
       ;;
   esac
@@ -815,12 +830,48 @@ check_and_install_deps() {
   elif command -v pacman >/dev/null 2>&1; then
     pacman -S --noconfirm --quiet $missing
   else
-    echo "error: no supported package manager found (apt/dnf/yum/apk/pacman)" >&2
-    echo "       please install manually:$missing" >&2
+    echo "error: 未找到支持的包管理器 (apt/dnf/yum/apk/pacman)" >&2
+    echo "       请手动安装:$missing" >&2
     return 1
   fi
 
-  echo "    dependencies installed"
+  echo "    依赖安装完成"
+}
+
+fix_modemmanager_container() {
+  # 检测是否运行在容器/虚拟化环境中 (如 WSL)
+  virt_type=""
+  if command -v systemd-detect-virt >/dev/null 2>&1; then
+    virt_type="$(systemd-detect-virt 2>/dev/null || echo '')"
+  fi
+
+  if [ -z "$virt_type" ]; then
+    return 0
+  fi
+
+  echo "==> 检测到虚拟化环境: $virt_type"
+
+  # 检查 ModemManager 是否因 ConditionVirtualization=!container 被跳过
+  if ! systemctl is-active --quiet ModemManager 2>/dev/null; then
+    mm_status="$(systemctl status ModemManager --no-pager 2>&1 || true)"
+    case "$mm_status" in
+      *ConditionVirtualization*|*container*)
+        echo "    ModemManager 因容器环境检测被 systemd 跳过"
+        echo "    原因: ModemManager.service 包含 ConditionVirtualization=!container 条件"
+        echo "    修复: 创建 override 清除该条件"
+        mkdir -p /etc/systemd/system/ModemManager.service.d
+        printf '[Unit]\nConditionVirtualization=\n' > /etc/systemd/system/ModemManager.service.d/00-wsl-override.conf
+        systemctl daemon-reload
+        systemctl start ModemManager 2>/dev/null || true
+        sleep 2
+        if systemctl is-active --quiet ModemManager 2>/dev/null; then
+          echo "    [OK] ModemManager 已启动"
+        else
+          echo "    [警告] ModemManager 仍未能启动 (可能缺少硬件支持, 不影响安装)"
+        fi
+        ;;
+    esac
+  fi
 }
 
 
@@ -831,6 +882,7 @@ main() {
   require_cmd mktemp
 
   check_and_install_deps
+  fix_modemmanager_container
 
   tmp_dir="$(mktemp -d)"
   trap 'rm -rf "$tmp_dir"' EXIT INT TERM
@@ -850,24 +902,24 @@ main() {
 
   download_release_asset "$archive_path" "$asset_url"
 
-  echo "==> extracting package"
+  echo "==> 解压安装包"
   mkdir -p "${tmp_dir}/pkg"
   tar -xzf "$archive_path" -C "${tmp_dir}/pkg"
 
   if [ ! -f "${tmp_dir}/pkg/simadmin" ]; then
-    echo "error: invalid package, missing simadmin binary" >&2
+    echo "error: 安装包无效, 缺少 simadmin 二进制文件" >&2
     exit 1
   fi
 
   if [ ! -d "${tmp_dir}/pkg/www" ]; then
-    echo "error: invalid package, missing frontend www directory" >&2
+    echo "error: 安装包无效, 缺少前端 www 目录" >&2
     exit 1
   fi
 
-  echo "==> stopping existing service"
+  echo "==> 停止现有服务"
   systemctl stop "${SERVICE_NAME}.service" >/dev/null 2>&1 || true
 
-  echo "==> installing files to ${INSTALL_DIR}"
+  echo "==> 安装文件到 ${INSTALL_DIR}"
   mkdir -p "${INSTALL_DIR}"
   install -m 0755 "${tmp_dir}/pkg/simadmin" "${INSTALL_DIR}/simadmin"
   rm -rf "${INSTALL_DIR}/www"
@@ -880,42 +932,42 @@ main() {
 
   install_lpac
 
-  echo "==> installing systemd unit"
+  echo "==> 安装 systemd 服务"
   install_service_file
-  echo "==> installing modem recovery service"
+  echo "==> 安装 modem 恢复服务"
   install_modem_recovery_service
 
   configure_networkmanager_modem_unmanaged
 
-  echo "==> starting service"
+  echo "==> 启动服务"
   systemctl restart "${SERVICE_NAME}.service"
   sleep 1
 
-  # Get installed version
+  # 获取已安装版本
   installed_version="$("${INSTALL_DIR}/simadmin" --version 2>/dev/null || echo 'unknown')"
 
   echo ""
   echo "========================================"
-  echo "  SimAdmin installed successfully!"
+  echo "  SimAdmin 安装成功!"
   echo "========================================"
-  echo "  Version:     ${installed_version}"
-  echo "  Install dir: ${INSTALL_DIR}"
-  echo "  Service:     ${SERVICE_NAME}.service"
-  echo "  Modem recovery: simadmin-modem-recovery.service"
-  echo "  Web UI:      http://$(hostname -I 2>/dev/null | awk '{print $1}' || echo 'localhost'):3000"
+  echo "  版本:       ${installed_version}"
+  echo "  安装路径:   ${INSTALL_DIR}"
+  echo "  服务名:     ${SERVICE_NAME}.service"
+  echo "  Modem恢复:  simadmin-modem-recovery.service"
+  echo "  Web UI:     http://$(hostname -I 2>/dev/null | awk '{print $1}' || echo 'localhost'):3000"
   echo "----------------------------------------"
-  echo "  Next steps:"
-  echo "    1. Open the Web UI in your browser"
-  echo "    2. Set up admin password on first launch"
-  echo "    3. Manage SIM, network, SMS, and OTA"
+  echo "  接下来:"
+  echo "    1. 在浏览器中打开 Web UI"
+  echo "    2. 首次启动时设置管理员密码"
+  echo "    3. 管理 SIM、网络、短信、OTA"
   echo "----------------------------------------"
-  echo "  Logs:     journalctl -u ${SERVICE_NAME} -f"
-  echo "  Stop:     systemctl stop ${SERVICE_NAME}"
-  echo "  Restart:  systemctl restart ${SERVICE_NAME}"
-  echo "  Uninstall: curl -fsSL https://raw.githubusercontent.com/${REPO}/main/uninstall.sh | sh"
+  echo "  日志:     journalctl -u ${SERVICE_NAME} -f"
+  echo "  停止:     systemctl stop ${SERVICE_NAME}"
+  echo "  重启:     systemctl restart ${SERVICE_NAME}"
+  echo "  卸载:     curl -fsSL https://raw.githubusercontent.com/${REPO}/main/uninstall.sh | sh"
   echo "========================================"
   echo ""
-  systemctl is-active --quiet "${SERVICE_NAME}.service" && echo "Service status: ACTIVE (running)" || echo "Service status: WARNING (not running)"
+  systemctl is-active --quiet "${SERVICE_NAME}.service" && echo "服务状态: 运行中" || echo "服务状态: 警告 (未运行)"
 }
 
 main "$@"
